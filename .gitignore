@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.env
+.DS_Store
+
+# C build artifacts
+*.o
+
+# Specifically ignore object files inside src (optional but explicit)
+src/*.o
+
+# Compiled binary
+tetris_os
+
+highscore.txt
