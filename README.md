@@ -1,68 +1,75 @@
-# Tetris OS Simulator — Phase 1
+# Tetris Project (C + Web)
 
-## Project Description
-A fully playable Tetris game built as a simulated OS running in a Linux terminal.
-All five custom libraries (math, string, memory, screen, keyboard) are implemented
-from scratch and integrated into a real-time interactive game loop — no standard
-`<string.h>`, `<math.h>`, or direct `malloc`/`free` used in game logic.
+This repository contains two playable Tetris experiences:
 
----
+1. A terminal-based game written in C (`tetris_os`).
+2. A browser-based game with a C WebSocket backend and a React frontend (`backend` + `ui`).
 
-## 7 OS Module Coverage
+## Repository Layout
 
-| Module | Implementation |
-|---|---|
-| **1. Process Management** | `game_loop()` acts as a round-robin scheduler: Input → Physics → Render each frame |
-| **2. Memory Management** | `memory.c` — first-fit free-list allocator over a 1 MB virtual RAM slab; board, state, and pieces are all `t_alloc`'d and `t_dealloc`'d |
-| **3. File System** | `score_load()` / `score_save()` persist the high score in `highscore.txt` between sessions using `fgetc`/`fputc` (no `fscanf`/`fprintf`) |
-| **4. I/O Management** | `keyboard.c` (raw non-blocking input) + `screen.c` (ANSI escape output via `putchar` — no `printf`) |
-| **5. Error Handling** | Every `t_alloc` is NULL-checked; all moves validated via `t_in_bounds()`; game-over triggered cleanly instead of crashing |
-| **6. Networking** | HUD shows `[SOLO MODE]` stub; architecture is modular for future multiplayer hook-in |
-| **7. User Interface** | Full ANSI colored board, ghost shadow, HUD panel, controls legend, game-over overlay — all via `screen.c` |
+- `src/`, `include/`, `Makefile`: terminal Tetris and custom C utility modules.
+- `backend/`: standalone C WebSocket server (`tetris_ws`) that emits game state JSON.
+- `ui/`: Vite + React client that renders the board and sends player actions.
 
----
+## Prerequisites
 
-## Controls
+- C compiler (`gcc` recommended)
+- `make`
+- Node.js 18+ and npm (for `ui`)
 
-| Key | Action |
-|---|---|
-| `A` | Move piece left |
-| `D` | Move piece right |
-| `W` | Rotate piece clockwise (with wall-kick) |
-| `S` | Soft drop (hold to fall faster) |
-| `Space` | Hard drop (instant place, +2 pts/row) |
-| `Q` | Quit game |
-| `R` | Retry after game over |
-
----
-
-## Build & Run
+## Option 1: Run Terminal Tetris
 
 ```bash
-make clean    # remove object files and binary
-make          # compiles all .c files, links into ./tetris_os
-./tetris_os   # run the game
+make clean
+make
+./tetris_os
 ```
 
-**Requirements:** GCC, a Linux/macOS terminal with ANSI support (80×26 minimum recommended).
+### Terminal Controls
 
----
+- `A`: move left
+- `D`: move right
+- `W`: rotate
+- `S`: soft drop
+- `Space`: hard drop
+- `Q`: quit
+- `R`: retry (after game over)
 
-## Library Usage Summary
+## Option 2: Run Web Tetris (Backend + UI)
 
-| Library | Functions used in main.c |
-|---|---|
-| `memory.c` | `memory_init`, `t_alloc`, `t_dealloc`, `memory_cleanup` |
-| `t_math.c` | `t_mul`, `t_div`, `t_mod`, `t_in_bounds`, `t_max`, `t_clamp` |
-| `t_string.c` | `t_itoa`, `t_strcpy`, `t_strlen` |
-| `keyboard.c` | `keyboard_init`, `keyboard_restore`, `keyPressed` |
-| `screen.c` | `screen_clear`, `screen_set_cursor`, `screen_render_string`, `screen_render_char`, `screen_set_color`, `screen_reset_color`, `screen_hide_cursor`, `screen_show_cursor` |
+In one terminal:
 
----
+```bash
+cd backend
+make clean
+make
+./tetris_ws
+```
 
-## Known Issues / Phase 1 Scope
-- **No audio**: terminal-only, no sound output.
-- **Frame rate**: busy-wait timing (no `usleep`) — may vary slightly between machines.
-- **Color**: requires an ANSI-compatible terminal (most modern terminals qualify).
-- **Networking**: stub only; multiplayer not implemented in Phase 1.
-- **`printf`/`scanf`**: not used anywhere — all output via `putchar` + `screen.c`.
+In a second terminal:
+
+```bash
+cd ui
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`.
+
+The UI connects to `ws://localhost:8080` by default.  
+To use another backend URL, set `VITE_WS_URL` in `ui/.env`.
+
+### Web Controls
+
+- `Arrow Left/Right`: move
+- `Arrow Up`: rotate
+- `Arrow Down`: soft drop
+- `Space`: hard drop
+- `P`: pause/resume
+- `R`: restart
+
+## Notes
+
+- Terminal mode persists score in `highscore.txt` (ignored by git).
+- WebSocket backend is single-client by design.
+- No automated tests are currently configured in this repository.

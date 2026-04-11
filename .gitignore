@@ -5,11 +5,22 @@ __pycache__/
 
 # C build artifacts
 *.o
+*.out
 
-# Specifically ignore object files inside src (optional but explicit)
-src/*.o
-
-# Compiled binary
+# Binaries
 tetris_os
+backend/tetris_ws
 
+# Runtime files
 highscore.txt
+
+# Node / frontend artifacts
+ui/node_modules/
+ui/dist/
+ui/.vite/
+ui/.env
+ui/.env.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
