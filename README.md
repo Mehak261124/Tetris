@@ -11,6 +11,14 @@ This repository contains two playable Tetris experiences:
 - `backend/`: standalone C WebSocket server (`tetris_ws`) that emits game state JSON.
 - `ui/`: Vite + React client that renders the board and sends player actions.
 
+## Phase Mapping (for evaluation)
+
+- **Phase I deliverables include both UIs:**
+  - Terminal UI (ANSI-rendered) via `screen.c`
+  - Browser UI via `backend/` + `ui/`
+- **Phase I custom-library compliance is demonstrated in the core C engine** (`src/` + `include/`), where gameplay logic is built using `memory.c`, `string.c`, `math.c`, `keyboard.c`, and `screen.c`.
+- Web modules are included as an additional UI access path for the same Tetris gameplay experience.
+
 ## Prerequisites
 
 - C compiler (`gcc` recommended)
@@ -72,4 +80,5 @@ To use another backend URL, set `VITE_WS_URL` in `ui/.env`.
 
 - Terminal mode persists score in `highscore.txt` (ignored by git).
 - WebSocket backend is single-client by design.
+- Core library-integration evaluation points are in `src/main.c` and the five custom libraries under `src/` and `include/`.
 - No automated tests are currently configured in this repository.

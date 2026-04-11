@@ -130,6 +130,32 @@ static int str_eq(const char *a, const char *b) {
     return a[i] == '\0' && b[i] == '\0';
 }
 
+static void write_fd_str(int fd, const char *s) {
+    if (!s) return;
+    (void)write(fd, s, (size_t)str_len(s));
+}
+
+static void write_fd_int(int fd, int v) {
+    char tmp[16];
+    int n = 0;
+    if (v == 0) {
+        (void)write(fd, "0", 1);
+        return;
+    }
+    if (v < 0) {
+        (void)write(fd, "-", 1);
+        v = -v;
+    }
+    while (v > 0 && n < (int)sizeof(tmp)) {
+        tmp[n++] = (char)('0' + (v % 10));
+        v /= 10;
+    }
+    while (n > 0) {
+        n--;
+        (void)write(fd, &tmp[n], 1);
+    }
+}
+
 static void mem_move(unsigned char *dst, const unsigned char *src, int n) {
     int i;
     if (dst < src) {
@@ -333,15 +359,19 @@ static int websocket_handshake(int fd) {
 
     /* Send protocol-switch response to complete upgrade. */
     char resp[256];
-    int resp_len = snprintf(
-        resp,
-        sizeof(resp),
-        "HTTP/1.1 101 Switching Protocols\r\n"
-        "Upgrade: websocket\r\n"
-        "Connection: Upgrade\r\n"
-        "Sec-WebSocket-Accept: %s\r\n\r\n",
-        accept
-    );
+    int resp_len = 0;
+    const char *p1 = "HTTP/1.1 101 Switching Protocols\r\n";
+    const char *p2 = "Upgrade: websocket\r\n";
+    const char *p3 = "Connection: Upgrade\r\n";
+    const char *p4 = "Sec-WebSocket-Accept: ";
+    const char *p5 = "\r\n\r\n";
+
+    for (int i = 0; p1[i] && resp_len < (int)sizeof(resp) - 1; i++) resp[resp_len++] = p1[i];
+    for (int i = 0; p2[i] && resp_len < (int)sizeof(resp) - 1; i++) resp[resp_len++] = p2[i];
+    for (int i = 0; p3[i] && resp_len < (int)sizeof(resp) - 1; i++) resp[resp_len++] = p3[i];
+    for (int i = 0; p4[i] && resp_len < (int)sizeof(resp) - 1; i++) resp[resp_len++] = p4[i];
+    for (int i = 0; accept[i] && resp_len < (int)sizeof(resp) - 1; i++) resp[resp_len++] = accept[i];
+    for (int i = 0; p5[i] && resp_len < (int)sizeof(resp) - 1; i++) resp[resp_len++] = p5[i];
     if (resp_len <= 0) return -1;
     return (int)send(fd, resp, resp_len, 0);
 }
@@ -816,7 +846,9 @@ int main(void) {
         return 1;
     }
 
-    printf("Tetris WS backend listening on ws://localhost:%d\n", PORT_DEFAULT);
+    write_fd_str(1, "Tetris WS backend listening on ws://localhost:");
+    write_fd_int(1, PORT_DEFAULT);
+    write_fd_str(1, "\n");
 
     /* Single-client server: accept one browser connection and drive that session. */
     int client_fd = accept(server_fd, NULL, NULL);
@@ -827,7 +859,7 @@ int main(void) {
     }
 
     if (websocket_handshake(client_fd) < 0) {
-        fprintf(stderr, "WebSocket handshake failed\n");
+        write_fd_str(2, "WebSocket handshake failed\n");
         close(client_fd);
         close(server_fd);
         return 1;

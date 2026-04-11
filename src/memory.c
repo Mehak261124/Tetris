@@ -145,8 +145,29 @@ void *t_alloc(int size) {
 void t_dealloc(void *ptr) {
     if (!ptr || !head) return;    /* guard: nothing to free */
 
-    /* Recover the BlockHeader that sits just before the payload */
-    BlockHeader *block = (BlockHeader *)((char *)ptr - sizeof(BlockHeader));
+    /* Reject pointers outside our virtual RAM slab. */
+    char *ram_start = (char *)virtual_ram;
+    char *ram_end   = ram_start + total_ram;
+    char *p         = (char *)ptr;
+    if (p < ram_start + (int)sizeof(BlockHeader) || p >= ram_end) return;
+
+    /*
+     * Validate ownership by walking known blocks and matching an exact payload
+     * start address. This prevents corrupting allocator metadata on bad input.
+     */
+    BlockHeader *block = NULL;
+    BlockHeader *scan = head;
+    while (scan) {
+        char *payload = (char *)scan + sizeof(BlockHeader);
+        if (payload == p) {
+            block = scan;
+            break;
+        }
+        scan = scan->next;
+    }
+    if (!block) return;      /* pointer does not belong to allocator */
+    if (block->is_free) return;  /* ignore double-free */
+
     block->is_free = 1;           /* mark the block as available again */
 
     /* ---- Coalescing pass: merge adjacent free blocks -------------------- */
