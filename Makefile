@@ -1,7 +1,7 @@
 CC     = gcc
 CFLAGS = -Wall -Wextra -Iinclude
 
-SRCS = src/main.c src/math.c src/string.c src/memory.c src/screen.c src/keyboard.c
+SRCS = src/main.c src/math.c src/string.c src/memory.c src/screen.c src/keyboard.c src/sound.c
 OBJS = $(SRCS:.c=.o)
 EXEC = tetris_os
 

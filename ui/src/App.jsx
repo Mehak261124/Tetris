@@ -130,6 +130,8 @@ export default function App() {
   const reconnectTimer = useRef(null);
   const [scoreFlash, setScoreFlash] = useState(false);
   const [lineFlash, setLineFlash] = useState(false);
+  const [boardShake, setBoardShake] = useState(false);
+  const prevLines = useRef(state.lines);
 
   const grid = useMemo(
     () => buildRenderGrid(state.board, state.currentPiece, state.ghostPiece),
@@ -147,6 +149,14 @@ export default function App() {
     if (!Number.isFinite(state.lines)) return;
     setLineFlash(true);
     const t = setTimeout(() => setLineFlash(false), 160);
+    /* Screen shake on line clear */
+    if (state.lines > prevLines.current) {
+      setBoardShake(true);
+      const t2 = setTimeout(() => setBoardShake(false), 250);
+      prevLines.current = state.lines;
+      return () => { clearTimeout(t); clearTimeout(t2); };
+    }
+    prevLines.current = state.lines;
     return () => clearTimeout(t);
   }, [state.lines]);
 
@@ -220,60 +230,86 @@ export default function App() {
       ? "Connection error"
       : "";
 
+  const boardClasses = [
+    "board-shell",
+    "crt",
+    lineFlash ? "lines-flash" : "",
+    boardShake ? "board-shake" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <div className="min-h-screen bg-[#050509] text-slate-100 flex items-center justify-center p-6">
-      <div className="flex flex-col lg:flex-row gap-8 items-start">
-        <div className="flex flex-col items-center lg:items-start gap-4">
+    <div className="game-wrapper">
+      <div className="game-layout">
+        {/* -- Left: Game Board -- */}
+        <div className="game-column">
           <div className="game-title">TETRIS</div>
-          <div className={`board-shell crt ${lineFlash ? "lines-flash" : ""}`}>
-          <div className="scanlines" />
-          <div className="board-grid">
-            {grid.map((row, rowIndex) =>
-              row.map((cell, colIndex) => {
-                const type = cell.active ? cell.activeType : cell.type;
-                const ghostType = cell.ghost ? cell.ghostType : 0;
-                const dataType = type || ghostType || 0;
-                return (
-                  <div
-                    key={`${rowIndex}-${colIndex}`}
-                    className={`cell ${cell.active ? "cell-active" : ""}`}
-                    data-type={dataType}
-                    data-ghost={cell.ghost && !cell.active ? "true" : "false"}
-                  />
-                );
-              })
+          <div className={boardClasses}>
+            <div className="scanlines" />
+            <div className="board-grid">
+              {grid.map((row, rowIndex) =>
+                row.map((cell, colIndex) => {
+                  const type = cell.active ? cell.activeType : cell.type;
+                  const ghostType = cell.ghost ? cell.ghostType : 0;
+                  const dataType = type || ghostType || 0;
+                  return (
+                    <div
+                      key={`${rowIndex}-${colIndex}`}
+                      className={`cell ${cell.active ? "cell-active" : ""}`}
+                      data-type={dataType}
+                      data-ghost={cell.ghost && !cell.active ? "true" : "false"}
+                    />
+                  );
+                })
+              )}
+            </div>
+            {wsMessage && <div className="ws-status">{wsMessage}</div>}
+            {showPaused && (
+              <div className="overlay">
+                <div className="overlay-card">
+                  <div className="overlay-title">PAUSED</div>
+                  <button
+                    className="overlay-button"
+                    onClick={() => sendAction("pause")}
+                  >
+                    Resume
+                  </button>
+                </div>
+              </div>
+            )}
+            {showOverlay && (
+              <div className="overlay">
+                <div className="overlay-card">
+                  <div className="overlay-title">GAME OVER</div>
+                  <button
+                    className="overlay-button"
+                    onClick={() => sendAction("restart")}
+                  >
+                    Restart
+                  </button>
+                </div>
+              </div>
             )}
           </div>
-          {wsMessage && <div className="ws-status">{wsMessage}</div>}
-          {showPaused && (
-            <div className="overlay">
-              <div className="overlay-card">
-                <div className="overlay-title">PAUSED</div>
-                <button
-                  className="overlay-button"
-                  onClick={() => sendAction("pause")}
-                >
-                  Resume
-                </button>
-              </div>
+
+          {/* -- Mobile Touch Controls -- */}
+          <div className="touch-controls">
+            <div className="touch-row">
+              <button className="touch-btn" onClick={() => sendAction("move_left")}>◀</button>
+              <button className="touch-btn" onClick={() => sendAction("rotate")}>▲</button>
+              <button className="touch-btn" onClick={() => sendAction("soft_drop")}>▼</button>
+              <button className="touch-btn" onClick={() => sendAction("move_right")}>▶</button>
             </div>
-          )}
-          {showOverlay && (
-            <div className="overlay">
-              <div className="overlay-card">
-                <div className="overlay-title">GAME OVER</div>
-                <button
-                  className="overlay-button"
-                  onClick={() => sendAction("restart")}
-                >
-                  Restart
-                </button>
-              </div>
+            <div className="touch-row">
+              <button className="touch-btn touch-btn-wide" onClick={() => sendAction("hard_drop")}>DROP</button>
+              <button className="touch-btn" onClick={() => sendAction("pause")}>⏸</button>
+              <button className="touch-btn" onClick={() => sendAction("restart")}>↻</button>
             </div>
-          )}
           </div>
         </div>
 
+        {/* -- Right: Side Panel -- */}
         <div className="side-panel">
           <div className="panel-block">
             <div className="panel-title">Next Piece</div>
@@ -285,18 +321,18 @@ export default function App() {
             <div className={`panel-value ${scoreFlash ? "score-flash" : ""}`}>
               {state.score}
             </div>
-            <div className="panel-title mt-6">Level</div>
+            <div className="panel-title" style={{ marginTop: "clamp(8px, 1.2vmin, 24px)" }}>Level</div>
             <div className="panel-value">{state.level}</div>
-            <div className="panel-title mt-6">Lines</div>
+            <div className="panel-title" style={{ marginTop: "clamp(8px, 1.2vmin, 24px)" }}>Lines</div>
             <div className="panel-value">{state.lines}</div>
           </div>
 
-          <div className="panel-block">
+          <div className="panel-block controls-desktop">
             <div className="panel-title">Controls</div>
             <ul className="controls">
-              <li>Arrow Left/Right: Move</li>
-              <li>Arrow Up: Rotate</li>
-              <li>Arrow Down: Soft Drop</li>
+              <li>← → : Move</li>
+              <li>↑ : Rotate</li>
+              <li>↓ : Soft Drop</li>
               <li>Space: Hard Drop</li>
               <li>P: Pause</li>
               <li>R: Restart</li>

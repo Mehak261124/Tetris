@@ -10,7 +10,8 @@
  *   The project forbids <math.h> for core logic.  This module also makes the
  *   intent of each calculation explicit — t_in_bounds() documents a boundary
  *   check far more clearly than raw comparison expressions scattered in main.
- * ============================================================================= */
+ * =============================================================================
+ */
 
 #include "../include/t_math.h"
 
@@ -18,41 +19,79 @@
  * t_mul(a, b)
  *   Integer multiplication.
  *   Used in: board indexing (row * BOARD_WIDTH + col), coordinate scaling.
- * --------------------------------------------------------------------------- */
+ * ---------------------------------------------------------------------------
+ */
 int t_mul(int a, int b) {
-    return a * b;
+  /* Repeated addition — no * operator */
+  int neg = 0;
+  if (a < 0) {
+    neg = !neg;
+    a = -a;
+  }
+  if (b < 0) {
+    neg = !neg;
+    b = -b;
+  }
+  /* Optimise: iterate on the smaller operand */
+  if (a < b) {
+    int tmp = a;
+    a = b;
+    b = tmp;
+  }
+  int result = 0, i;
+  for (i = 0; i < b; i++)
+    result += a;
+  return neg ? -result : result;
 }
 
 /* ---------------------------------------------------------------------------
  * t_div(a, b)
- *   Integer division with divide-by-zero guard.
+ *   Integer division via repeated subtraction — no / operator.
  *   Returns 0 if b == 0 (safe default; callers should still avoid passing 0).
  *   Used in: score calculation, level-speed formulas.
- * --------------------------------------------------------------------------- */
+ * ---------------------------------------------------------------------------
+ */
 int t_div(int a, int b) {
-    if (b == 0) return 0;   /* error handling: division by zero → 0 */
-    return a / b;
+  if (b == 0)
+    return 0; /* error handling: division by zero → 0 */
+  int neg = 0;
+  if (a < 0) {
+    neg = !neg;
+    a = -a;
+  }
+  if (b < 0) {
+    neg = !neg;
+    b = -b;
+  }
+  int quotient = 0;
+  while (a >= b) {
+    a -= b;
+    quotient++;
+  }
+  return neg ? -quotient : quotient;
 }
 
 /* ---------------------------------------------------------------------------
  * t_mod(a, b)
- *   Integer modulo with divide-by-zero guard.
+ *   Integer modulo without % operator — uses t_div and t_mul identity:
+ *     a mod b = a - (a / b) * b
  *   Returns 0 if b == 0.
  *   Used in: wrap-around logic, line-clear counting.
- * --------------------------------------------------------------------------- */
+ * ---------------------------------------------------------------------------
+ */
 int t_mod(int a, int b) {
-    if (b == 0) return 0;   /* error handling: modulo by zero → 0 */
-    return a % b;
+  if (b == 0)
+    return 0; /* error handling: modulo by zero → 0 */
+  return a - t_mul(t_div(a, b), b);
 }
 
 /* ---------------------------------------------------------------------------
  * t_abs(val)
  *   Returns the absolute (non-negative) value of val.
  *   Used in: collision distance checks, offset calculations.
- * --------------------------------------------------------------------------- */
-int t_abs(int val) {
-    return (val < 0) ? -val : val;
-}
+ * ---------------------------------------------------------------------------
+ */
+int t_abs(int val) { return (val < 0) ? -val : val; }
 
 /* ---------------------------------------------------------------------------
  * t_in_bounds(val, min, max)
@@ -65,9 +104,10 @@ int t_abs(int val) {
  *     val — the value to test (e.g. piece column after a move).
  *     min — inclusive lower bound (e.g. 0 = leftmost column).
  *     max — inclusive upper bound (e.g. BOARD_WIDTH-1 = rightmost column).
- * --------------------------------------------------------------------------- */
+ * ---------------------------------------------------------------------------
+ */
 int t_in_bounds(int val, int min, int max) {
-    return (val >= min && val <= max);
+  return (val >= min && val <= max);
 }
 
 /* ---------------------------------------------------------------------------
@@ -75,22 +115,22 @@ int t_in_bounds(int val, int min, int max) {
  *   Returns val clamped to [min, max].
  *   Unlike t_in_bounds (which just checks), this corrects out-of-range values.
  *   Used in: safe cursor positioning, score capping.
- * --------------------------------------------------------------------------- */
+ * ---------------------------------------------------------------------------
+ */
 int t_clamp(int val, int min, int max) {
-    if (val < min) return min;
-    if (val > max) return max;
-    return val;
+  if (val < min)
+    return min;
+  if (val > max)
+    return max;
+  return val;
 }
 
 /* ---------------------------------------------------------------------------
  * t_max(a, b) / t_min(a, b)
  *   Standard maximum / minimum helpers.
  *   Used in: layout calculations, speed formula (don't go faster than cap).
- * --------------------------------------------------------------------------- */
-int t_max(int a, int b) {
-    return (a > b) ? a : b;
-}
+ * ---------------------------------------------------------------------------
+ */
+int t_max(int a, int b) { return (a > b) ? a : b; }
 
-int t_min(int a, int b) {
-    return (a < b) ? a : b;
-}
+int t_min(int a, int b) { return (a < b) ? a : b; }

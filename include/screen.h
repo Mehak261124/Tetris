@@ -50,6 +50,7 @@ void screen_set_color(int fg, int bg);
 void screen_reset_color(void);
 void screen_hide_cursor(void);
 void screen_show_cursor(void);
+void screen_get_size(int *cols, int *rows); /* query terminal dimensions */
 
 /* ---- WebSocket mode functions ---------------------------------------------
  */

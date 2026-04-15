@@ -19,7 +19,8 @@
 
 #include "../include/screen.h"
 #include "../include/t_string.h"
-#include <stdio.h> /* putchar(), fflush() — terminal I/O, allowed */
+#include <stdio.h>     /* putchar(), fflush() — terminal I/O, allowed */
+#include <sys/ioctl.h> /* ioctl(), TIOCGWINSZ — terminal size query */
 
 /* ---- Hardware Abstraction headers for WebSocket mode --------------------- */
 #include <arpa/inet.h>  /* htons(), sockaddr_in — network address setup     */
@@ -141,6 +142,22 @@ void screen_show_cursor(void) {
   putchar('5');
   putchar('h');
   fflush(stdout);
+}
+
+void screen_get_size(int *cols, int *rows) {
+  struct winsize ws;
+  if (ioctl(1, TIOCGWINSZ, &ws) == 0) {
+    if (cols)
+      *cols = ws.ws_col;
+    if (rows)
+      *rows = ws.ws_row;
+  } else {
+    /* fallback defaults */
+    if (cols)
+      *cols = 80;
+    if (rows)
+      *rows = 24;
+  }
 }
 
 /* ========================== WEBSOCKET MODE =================================
