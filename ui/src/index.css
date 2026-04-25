@@ -18,6 +18,10 @@
   --font-panel-value: clamp(12px, 1.6vmin, 16px);
   --font-controls: clamp(7px, 1vmin, 10px);
   --font-overlay: clamp(10px, 1.6vmin, 14px);
+
+  /* Neon accent palette */
+  --cyan-glow: rgba(103, 232, 249, 0.7);
+  --gold-glow: rgba(255, 215, 0, 0.6);
 }
 
 body {
@@ -63,7 +67,28 @@ body {
   font-size: var(--font-title);
   letter-spacing: 4px;
   color: #67e8f9;
-  text-shadow: 0 0 12px rgba(103, 232, 249, 0.7);
+  text-shadow: 0 0 12px var(--cyan-glow);
+}
+
+/* ============================================================================
+ * PLAYER BAR — shows player name above the board (like terminal)
+ * ============================================================================ */
+.player-bar {
+  font-size: var(--font-panel-title);
+  color: #7dd3fc;
+  letter-spacing: 0.5px;
+  padding: clamp(2px, 0.4vmin, 6px) 0;
+  text-align: center;
+}
+
+.player-bar-label {
+  color: #4fc3f7;
+  opacity: 0.7;
+}
+
+.player-bar-name {
+  color: #67e8f9;
+  text-shadow: 0 0 8px var(--cyan-glow);
 }
 
 /* ============================================================================
@@ -187,6 +212,22 @@ body {
   color: #e0f2fe;
 }
 
+/* High score glow when player is beating the record */
+.highscore-value {
+  transition: color 0.3s, text-shadow 0.3s;
+}
+
+.highscore-glow {
+  color: #ffd700;
+  text-shadow: 0 0 10px var(--gold-glow), 0 0 20px var(--gold-glow);
+  animation: highscore-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes highscore-pulse {
+  0%, 100% { text-shadow: 0 0 10px var(--gold-glow); }
+  50% { text-shadow: 0 0 20px var(--gold-glow), 0 0 30px rgba(255, 215, 0, 0.4); }
+}
+
 .controls {
   margin-top: clamp(6px, 1vmin, 12px);
   font-size: var(--font-controls);
@@ -205,6 +246,148 @@ body {
 }
 
 /* ============================================================================
+ * SOUND TOGGLE
+ * ============================================================================ */
+.sound-toggle {
+  font-family: "Press Start 2P", monospace;
+  font-size: var(--font-controls);
+  padding: clamp(6px, 0.8vmin, 10px) clamp(10px, 1.2vmin, 16px);
+  background: rgba(8, 15, 25, 0.9);
+  border: 1px solid rgba(0, 255, 255, 0.15);
+  color: #7dd3fc;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+  letter-spacing: 0.5px;
+}
+
+.sound-toggle:hover {
+  border-color: rgba(0, 255, 255, 0.4);
+  box-shadow: 0 0 12px rgba(0, 255, 255, 0.15);
+}
+
+.sound-off {
+  color: #64748b;
+  border-color: rgba(100, 116, 139, 0.3);
+}
+
+/* ============================================================================
+ * TAB SWITCHER — Controls / Leaderboard
+ * ============================================================================ */
+.tab-switcher {
+  display: flex;
+  gap: 2px;
+  background: rgba(8, 15, 25, 0.6);
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 255, 255, 0.1);
+}
+
+.tab-btn {
+  flex: 1;
+  font-family: "Press Start 2P", monospace;
+  font-size: clamp(6px, 0.9vmin, 9px);
+  padding: clamp(6px, 0.8vmin, 10px) clamp(4px, 0.6vmin, 8px);
+  background: transparent;
+  color: #64748b;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tab-btn:hover {
+  color: #7dd3fc;
+}
+
+.tab-active {
+  background: rgba(0, 255, 255, 0.08);
+  color: #67e8f9;
+  text-shadow: 0 0 8px var(--cyan-glow);
+}
+
+/* ============================================================================
+ * LEADERBOARD PANEL
+ * ============================================================================ */
+.leaderboard-panel {
+  max-height: clamp(180px, 30vh, 300px);
+  overflow-y: auto;
+}
+
+.leaderboard-panel::-webkit-scrollbar {
+  width: 4px;
+}
+.leaderboard-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+.leaderboard-panel::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 255, 0.2);
+  border-radius: 2px;
+}
+
+.lb-empty {
+  font-size: var(--font-controls);
+  color: #475569;
+  padding: clamp(8px, 1vmin, 16px) 0;
+  text-align: center;
+}
+
+.lb-list {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(4px, 0.6vmin, 8px);
+  margin-top: clamp(6px, 1vmin, 12px);
+}
+
+.lb-row {
+  display: flex;
+  align-items: center;
+  gap: clamp(4px, 0.6vmin, 8px);
+  font-size: var(--font-controls);
+  color: #cbd5f5;
+  padding: clamp(3px, 0.4vmin, 6px) clamp(4px, 0.6vmin, 8px);
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+
+.lb-row:hover {
+  background: rgba(0, 255, 255, 0.04);
+}
+
+.lb-highlight {
+  background: rgba(103, 232, 249, 0.06);
+  border: 1px solid rgba(103, 232, 249, 0.15);
+}
+
+.lb-rank {
+  min-width: clamp(18px, 2.5vmin, 28px);
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.lb-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #e0f2fe;
+}
+
+.lb-score {
+  color: #67e8f9;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.lb-meta {
+  color: #475569;
+  font-size: clamp(5px, 0.7vmin, 8px);
+  flex-shrink: 0;
+}
+
+/* ============================================================================
  * OVERLAYS
  * ============================================================================ */
 .overlay {
@@ -219,18 +402,82 @@ body {
 }
 
 .overlay-card {
-  background: rgba(10, 14, 20, 0.9);
+  background: rgba(10, 14, 20, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.2);
   padding: clamp(12px, 2vmin, 24px);
   border-radius: 12px;
   text-align: center;
   box-shadow: 0 0 25px rgba(0, 255, 255, 0.2);
+  min-width: clamp(160px, 20vmin, 260px);
 }
 
 .overlay-title {
   font-size: var(--font-overlay);
   color: #f87171;
   margin-bottom: clamp(8px, 1vmin, 12px);
+}
+
+.pause-title {
+  color: #fbbf24;
+}
+
+/* Game over card — enhanced */
+.gameover-card {
+  animation: gameover-appear 0.4s ease-out;
+}
+
+@keyframes gameover-appear {
+  0% { transform: scale(0.8); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.new-highscore-badge {
+  font-size: var(--font-controls);
+  color: #ffd700;
+  text-shadow: 0 0 12px var(--gold-glow);
+  margin-bottom: clamp(8px, 1vmin, 14px);
+  animation: highscore-flash 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes highscore-flash {
+  0% { opacity: 0.7; transform: scale(1); }
+  100% { opacity: 1; transform: scale(1.05); }
+}
+
+.gameover-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(4px, 0.6vmin, 8px);
+  margin-bottom: clamp(10px, 1.5vmin, 18px);
+  text-align: left;
+}
+
+.gameover-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: clamp(4px, 0.5vmin, 8px);
+  background: rgba(0, 255, 255, 0.03);
+  border-radius: 6px;
+}
+
+.gameover-stat-label {
+  font-size: clamp(5px, 0.7vmin, 7px);
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.gameover-stat-value {
+  font-size: var(--font-controls);
+  color: #e0f2fe;
+}
+
+.gameover-actions {
+  display: flex;
+  gap: clamp(6px, 0.8vmin, 12px);
+  justify-content: center;
+  flex-wrap: wrap;
 }
 
 .overlay-button {
@@ -244,11 +491,27 @@ body {
   text-transform: uppercase;
   letter-spacing: 1px;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.15s, transform 0.1s;
 }
 
 .overlay-button:hover {
   background: #38bdf8;
+  transform: translateY(-1px);
+}
+
+.overlay-button:active {
+  transform: translateY(0);
+}
+
+.overlay-button-secondary {
+  background: transparent;
+  border: 1px solid rgba(0, 255, 255, 0.3);
+  color: #7dd3fc;
+}
+
+.overlay-button-secondary:hover {
+  background: rgba(0, 255, 255, 0.08);
+  border-color: rgba(0, 255, 255, 0.5);
 }
 
 .ws-status {
@@ -256,6 +519,153 @@ body {
   font-size: var(--font-controls);
   color: #fbbf24;
   text-align: center;
+}
+
+/* ============================================================================
+ * START SCREEN — Player name entry
+ * ============================================================================ */
+.start-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(24px, 4vmin, 48px);
+  padding: clamp(16px, 3vmin, 40px);
+  max-width: 420px;
+  width: 100%;
+}
+
+.start-logo {
+  text-align: center;
+  animation: logo-float 3s ease-in-out infinite;
+}
+
+@keyframes logo-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.start-logo-text {
+  font-size: clamp(28px, 6vmin, 56px);
+  letter-spacing: 8px;
+  color: #67e8f9;
+  text-shadow:
+    0 0 20px var(--cyan-glow),
+    0 0 40px rgba(103, 232, 249, 0.4),
+    0 0 80px rgba(103, 232, 249, 0.2);
+}
+
+.start-logo-sub {
+  font-size: clamp(8px, 1.5vmin, 14px);
+  letter-spacing: 6px;
+  color: #4fc3f7;
+  opacity: 0.6;
+  margin-top: clamp(4px, 0.8vmin, 10px);
+}
+
+.start-form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(12px, 2vmin, 20px);
+  width: 100%;
+  max-width: 320px;
+}
+
+.start-label {
+  font-size: var(--font-panel-title);
+  color: #7dd3fc;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.start-input {
+  font-family: "Press Start 2P", monospace;
+  font-size: clamp(10px, 1.6vmin, 14px);
+  width: 100%;
+  padding: clamp(10px, 1.5vmin, 16px);
+  background: rgba(8, 15, 25, 0.9);
+  border: 1px solid rgba(103, 232, 249, 0.3);
+  border-radius: 8px;
+  color: #e0f2fe;
+  text-align: center;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
+}
+
+.start-input::placeholder {
+  color: #334155;
+}
+
+.start-input:focus {
+  border-color: rgba(103, 232, 249, 0.6);
+  box-shadow: 0 0 16px rgba(103, 232, 249, 0.2);
+}
+
+.start-btn {
+  font-family: "Press Start 2P", monospace;
+  font-size: clamp(10px, 1.5vmin, 13px);
+  padding: clamp(12px, 1.8vmin, 18px) clamp(24px, 4vmin, 40px);
+  background: linear-gradient(135deg, #0ea5e9, #06b6d4);
+  color: #03131c;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  transition: all 0.2s ease;
+  box-shadow: 0 0 20px rgba(14, 165, 233, 0.3);
+}
+
+.start-btn:hover {
+  background: linear-gradient(135deg, #38bdf8, #22d3ee);
+  box-shadow: 0 0 30px rgba(14, 165, 233, 0.5);
+  transform: translateY(-2px);
+}
+
+.start-btn:active {
+  transform: translateY(0);
+}
+
+/* Start screen — mini leaderboard preview */
+.start-leaderboard {
+  background: rgba(8, 15, 25, 0.7);
+  border: 1px solid rgba(0, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: clamp(12px, 1.5vmin, 20px);
+  width: 100%;
+  max-width: 320px;
+}
+
+.start-lb-row {
+  display: flex;
+  align-items: center;
+  gap: clamp(6px, 0.8vmin, 12px);
+  font-size: var(--font-controls);
+  color: #cbd5f5;
+  padding: clamp(3px, 0.4vmin, 6px) 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.start-lb-row:last-child {
+  border-bottom: none;
+}
+
+.start-lb-rank {
+  min-width: 20px;
+  text-align: center;
+}
+
+.start-lb-name {
+  flex: 1;
+  color: #e0f2fe;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.start-lb-score {
+  color: #67e8f9;
 }
 
 /* ============================================================================
@@ -347,7 +757,9 @@ body {
 
 @keyframes lines-flash {
   0% { filter: brightness(1.6) saturate(1.5); }
-  50% { filter: brightness(1.8); }
+  25% { filter: brightness(2.0) saturate(0.5); }
+  50% { filter: brightness(1.8) saturate(1.2); }
+  75% { filter: brightness(1.4); }
   100% { filter: brightness(1); }
 }
 
@@ -422,6 +834,14 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
+  }
+
+  .tab-switcher {
+    width: 100%;
+  }
+
+  .sound-toggle {
+    width: 100%;
   }
 }
 

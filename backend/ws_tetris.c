@@ -49,6 +49,10 @@
 #define NUM_ROTATIONS 4
 #define PIECE_SIZE 4
 
+#define PLAYER_NAME_MAX 20
+#define LEADERBOARD_MAX 10
+#define LEADERBOARD_FILE "leaderboard.txt"
+
 /* Active piece coordinates are board-space cell indices, not pixels. */
 typedef struct {
   int type;
@@ -56,6 +60,14 @@ typedef struct {
   int x;
   int y;
 } Piece;
+
+/* Single leaderboard entry */
+typedef struct {
+  char name[PLAYER_NAME_MAX];
+  int score;
+  int level;
+  int lines;
+} LeaderEntry;
 
 /* Entire mutable game state for one running session.
  * Allocated dynamically via t_alloc() to satisfy the dynamic memory rule. */
@@ -70,7 +82,13 @@ typedef struct {
   int game_over;
   int paused;
   int rand_state;
+  char player_name[PLAYER_NAME_MAX];
+  int high_score;
 } Game;
+
+/* Global leaderboard (persisted to file) */
+static LeaderEntry leaderboard[LEADERBOARD_MAX];
+static int leaderboard_count = 0;
 
 /* Tetromino lookup table: [piece][rotation][row][col] -> 0/1 occupancy. */
 static const int PIECES[NUM_PIECES][NUM_ROTATIONS][PIECE_SIZE][PIECE_SIZE] = {
@@ -139,6 +157,146 @@ static void write_int(int v) {
   write_stdout(tmp);
 }
 
+/* =============================================================================
+ * LEADERBOARD — File System persistence
+ * =============================================================================
+ * Format per line: score|level|lines|name
+ * Uses <stdio.h> file I/O (allowed) and t_itoa/t_atoi from string.c.
+ */
+
+static void leaderboard_load(void) {
+  FILE *f = fopen(LEADERBOARD_FILE, "r");
+  if (!f) {
+    leaderboard_count = 0;
+    return;
+  }
+
+  leaderboard_count = 0;
+  while (leaderboard_count < LEADERBOARD_MAX) {
+    /* Read score */
+    char buf[128];
+    int bi = 0, c;
+    while (bi < (int)sizeof(buf) - 1 && (c = fgetc(f)) != EOF && c != '\n') {
+      buf[bi++] = (char)c;
+    }
+    if (bi == 0 && c == EOF)
+      break;
+    buf[bi] = '\0';
+
+    /* Parse: score|level|lines|name */
+    int field = 0;
+    int fi = 0;
+    char field_buf[64];
+    LeaderEntry *e = &leaderboard[leaderboard_count];
+    e->score = 0;
+    e->level = 1;
+    e->lines = 0;
+    e->name[0] = '\0';
+
+    for (int i = 0; i <= bi; i++) {
+      if (buf[i] == '|' || buf[i] == '\0') {
+        field_buf[fi] = '\0';
+        if (field == 0)
+          e->score = t_atoi(field_buf);
+        else if (field == 1)
+          e->level = t_atoi(field_buf);
+        else if (field == 2)
+          e->lines = t_atoi(field_buf);
+        else if (field == 3)
+          t_strncpy(e->name, field_buf, PLAYER_NAME_MAX);
+        field++;
+        fi = 0;
+      } else {
+        if (fi < (int)sizeof(field_buf) - 1)
+          field_buf[fi++] = buf[i];
+      }
+    }
+
+    if (t_strlen(e->name) == 0)
+      t_strncpy(e->name, "Player", PLAYER_NAME_MAX);
+
+    leaderboard_count++;
+  }
+
+  fclose(f);
+}
+
+static void leaderboard_save(void) {
+  FILE *f = fopen(LEADERBOARD_FILE, "w");
+  if (!f)
+    return;
+
+  for (int i = 0; i < leaderboard_count; i++) {
+    char tmp[16];
+    LeaderEntry *e = &leaderboard[i];
+
+    t_itoa(e->score, tmp);
+    int j = 0;
+    while (tmp[j])
+      fputc(tmp[j++], f);
+    fputc('|', f);
+
+    t_itoa(e->level, tmp);
+    j = 0;
+    while (tmp[j])
+      fputc(tmp[j++], f);
+    fputc('|', f);
+
+    t_itoa(e->lines, tmp);
+    j = 0;
+    while (tmp[j])
+      fputc(tmp[j++], f);
+    fputc('|', f);
+
+    j = 0;
+    while (e->name[j])
+      fputc(e->name[j++], f);
+    fputc('\n', f);
+  }
+
+  fclose(f);
+}
+
+static void leaderboard_insert(const char *name, int score, int level,
+                               int lines) {
+  /* Find insertion point (sorted descending by score) */
+  int pos = leaderboard_count;
+  for (int i = 0; i < leaderboard_count; i++) {
+    if (score > leaderboard[i].score) {
+      pos = i;
+      break;
+    }
+  }
+
+  if (pos >= LEADERBOARD_MAX)
+    return;
+
+  /* Shift entries down */
+  int end = leaderboard_count < LEADERBOARD_MAX ? leaderboard_count
+                                                : LEADERBOARD_MAX - 1;
+  for (int i = end; i > pos; i--) {
+    leaderboard[i] = leaderboard[i - 1];
+  }
+
+  /* Insert new entry */
+  t_strncpy(leaderboard[pos].name, name, PLAYER_NAME_MAX);
+  leaderboard[pos].score = score;
+  leaderboard[pos].level = level;
+  leaderboard[pos].lines = lines;
+
+  if (leaderboard_count < LEADERBOARD_MAX)
+    leaderboard_count++;
+
+  leaderboard_save();
+}
+
+/* Compute high score from leaderboard */
+static int leaderboard_high_score(void) {
+  if (leaderboard_count == 0)
+    return 0;
+  return leaderboard[0].score; /* sorted descending, first is highest */
+}
+
 /* ---------------- Game logic ---------------- */
 
 /* LCG pseudo-random generator.
@@ -173,11 +331,13 @@ static void game_reset(Game *g) {
   g->paused = 0;
   g->game_over = 0;
   g->has_current = 0;
+  g->high_score = leaderboard_high_score();
   seed_rand(g);
   g->next.type = rand_next(g);
   g->next.rotation = 0;
   g->next.x = 3;
   g->next.y = 0;
+  /* Note: player_name is NOT cleared on reset */
 }
 
 /* Boundary check using t_in_bounds from t_math.h. */
@@ -211,6 +371,11 @@ static void spawn_piece(Game *g) {
 
   if (collides(g, &g->current, 0, 0, g->current.rotation)) {
     g->game_over = 1;
+    /* Insert into leaderboard on game over */
+    if (g->score > 0) {
+      leaderboard_insert(g->player_name, g->score, g->level, g->lines);
+      g->high_score = leaderboard_high_score();
+    }
   }
 }
 
@@ -265,6 +430,10 @@ static void clear_lines(Game *g) {
                                 : 800;
     g->score += t_mul(base, g->level);
     g->level = 1 + t_div(g->lines, 10);
+
+    if (g->score > g->high_score) {
+      g->high_score = g->score;
+    }
   }
 }
 
@@ -279,6 +448,11 @@ static void step_down(Game *g) {
     int overflow = lock_piece(g);
     if (overflow) {
       g->game_over = 1;
+      /* Insert into leaderboard on game over */
+      if (g->score > 0) {
+        leaderboard_insert(g->player_name, g->score, g->level, g->lines);
+        g->high_score = leaderboard_high_score();
+      }
       return;
     }
     clear_lines(g);
@@ -294,13 +468,96 @@ static int ghost_y(Game *g) {
   return p.y;
 }
 
+/* ---- Parse action name from JSON ---- */
+static int parse_action(const char *msg, char *out, int out_sz) {
+  const char *needle = "\"action\"";
+  int i = 0;
+  while (msg[i]) {
+    int match = 1;
+    for (int j = 0; needle[j]; j++) {
+      if (msg[i + j] != needle[j]) {
+        match = 0;
+        break;
+      }
+    }
+    if (match) {
+      int k = i;
+      while (msg[k] && msg[k] != ':')
+        k++;
+      if (!msg[k])
+        return 0;
+      k++;
+      while (msg[k] && msg[k] != '"')
+        k++;
+      if (!msg[k])
+        return 0;
+      k++;
+      int o = 0;
+      while (msg[k] && msg[k] != '"' && o < out_sz - 1) {
+        out[o++] = msg[k++];
+      }
+      out[o] = '\0';
+      return 1;
+    }
+    i++;
+  }
+  return 0;
+}
+
+/* ---- Parse "name" field from JSON ---- */
+static int parse_name(const char *msg, char *out, int out_sz) {
+  const char *needle = "\"name\"";
+  int i = 0;
+  while (msg[i]) {
+    int match = 1;
+    for (int j = 0; needle[j]; j++) {
+      if (msg[i + j] != needle[j]) {
+        match = 0;
+        break;
+      }
+    }
+    if (match) {
+      int k = i;
+      while (msg[k] && msg[k] != ':')
+        k++;
+      if (!msg[k])
+        return 0;
+      k++;
+      while (msg[k] && msg[k] != '"')
+        k++;
+      if (!msg[k])
+        return 0;
+      k++;
+      int o = 0;
+      while (msg[k] && msg[k] != '"' && o < out_sz - 1) {
+        out[o++] = msg[k++];
+      }
+      out[o] = '\0';
+      return 1;
+    }
+    i++;
+  }
+  return 0;
+}
+
 /* Action handling uses t_strcmp from t_string.h. */
-static void handle_action(Game *g, const char *action) {
+static void handle_action(Game *g, const char *action, const char *raw_msg) {
+  if (t_strcmp(action, "set_name") == 0) {
+    char name[PLAYER_NAME_MAX];
+    if (parse_name(raw_msg, name, PLAYER_NAME_MAX)) {
+      t_strncpy(g->player_name, name, PLAYER_NAME_MAX);
+    }
+    return;
+  }
   if (t_strcmp(action, "pause") == 0) {
     g->paused = !g->paused;
     return;
   }
   if (t_strcmp(action, "restart") == 0) {
+    /* Save score to leaderboard before reset */
+    if (g->game_over && g->score > 0) {
+      /* Already saved on game_over trigger, skip duplicate */
+    }
     game_reset(g);
     return;
   }
@@ -337,46 +594,15 @@ static void handle_action(Game *g, const char *action) {
     int overflow = lock_piece(g);
     if (overflow) {
       g->game_over = 1;
+      if (g->score > 0) {
+        leaderboard_insert(g->player_name, g->score, g->level, g->lines);
+        g->high_score = leaderboard_high_score();
+      }
       return;
     }
     clear_lines(g);
     spawn_piece(g);
   }
-}
-
-static int parse_action(const char *msg, char *out, int out_sz) {
-  const char *needle = "\"action\"";
-  int i = 0;
-  while (msg[i]) {
-    int match = 1;
-    for (int j = 0; needle[j]; j++) {
-      if (msg[i + j] != needle[j]) {
-        match = 0;
-        break;
-      }
-    }
-    if (match) {
-      int k = i;
-      while (msg[k] && msg[k] != ':')
-        k++;
-      if (!msg[k])
-        return 0;
-      k++;
-      while (msg[k] && msg[k] != '"')
-        k++;
-      if (!msg[k])
-        return 0;
-      k++;
-      int o = 0;
-      while (msg[k] && msg[k] != '"' && o < out_sz - 1) {
-        out[o++] = msg[k++];
-      }
-      out[o] = '\0';
-      return 1;
-    }
-    i++;
-  }
-  return 0;
 }
 
 /* ---------------- JSON serialization ----------------
@@ -409,6 +635,23 @@ static void append_shape(char *buf, int *len, int type, int rot) {
       append_char(buf, len, ',');
   }
   append_char(buf, len, ']');
+}
+
+/* Escape a string for JSON (handles minimal escaping) */
+static void append_escaped_str(char *buf, int *len, const char *s) {
+  append_char(buf, len, '"');
+  for (int i = 0; s[i]; i++) {
+    if (s[i] == '"') {
+      append_char(buf, len, '\\');
+      append_char(buf, len, '"');
+    } else if (s[i] == '\\') {
+      append_char(buf, len, '\\');
+      append_char(buf, len, '\\');
+    } else {
+      append_char(buf, len, s[i]);
+    }
+  }
+  append_char(buf, len, '"');
 }
 
 static void build_state_json(Game *g, char *out, int out_sz) {
@@ -477,7 +720,18 @@ static void build_state_json(Game *g, char *out, int out_sz) {
   append_int(out, &len, g->level);
   append_str(out, &len, ",\"lines\":");
   append_int(out, &len, g->lines);
+  append_str(out, &len, ",\"highScore\":");
+  append_int(out, &len, g->high_score);
 
+  /* Player name */
+  append_str(out, &len, ",\"playerName\":");
+  if (t_strlen(g->player_name) > 0) {
+    append_escaped_str(out, &len, g->player_name);
+  } else {
+    append_str(out, &len, "\"Player\"");
+  }
+
+  /* Game state */
   append_str(out, &len, ",\"state\":\"");
   if (g->game_over)
     append_str(out, &len, "gameover");
@@ -486,6 +740,24 @@ static void build_state_json(Game *g, char *out, int out_sz) {
   else
     append_str(out, &len, "playing");
   append_char(out, &len, '"');
+
+  /* Leaderboard array */
+  append_str(out, &len, ",\"leaderboard\":[");
+  for (int i = 0; i < leaderboard_count; i++) {
+    append_char(out, &len, '{');
+    append_str(out, &len, "\"name\":");
+    append_escaped_str(out, &len, leaderboard[i].name);
+    append_str(out, &len, ",\"score\":");
+    append_int(out, &len, leaderboard[i].score);
+    append_str(out, &len, ",\"level\":");
+    append_int(out, &len, leaderboard[i].level);
+    append_str(out, &len, ",\"lines\":");
+    append_int(out, &len, leaderboard[i].lines);
+    append_char(out, &len, '}');
+    if (i < leaderboard_count - 1)
+      append_char(out, &len, ',');
+  }
+  append_char(out, &len, ']');
 
   append_char(out, &len, '}');
   if (len >= out_sz)
@@ -498,6 +770,9 @@ static void build_state_json(Game *g, char *out, int out_sz) {
 int main(void) {
   /* ---- Boot the custom memory subsystem (memory.c) -------------------- */
   memory_init(65536);
+
+  /* ---- Load leaderboard from file ------------------------------------- */
+  leaderboard_load();
 
   /* ---- Start server via screen.c (hardware abstraction) --------------- *
    * screen_server_start() wraps socket/bind/listen/accept — all raw
@@ -538,15 +813,22 @@ int main(void) {
     return 1;
   }
 
+  /* Initialize player name to default */
+  t_strncpy(game->player_name, "Player", PLAYER_NAME_MAX);
+
   game_reset(game);
   spawn_piece(game);
 
   char msg[2048];
-  char json[8192];
+  char json[16384]; /* larger buffer for leaderboard data */
 
   int tick_ms = 50;
   int drop_ticks = 12;
   int tick_counter = 0;
+
+  /* Send initial state immediately so UI has data */
+  build_state_json(game, json, sizeof(json));
+  screen_send_ws(json);
 
   while (1) {
     /* Poll for input via keyboard.c (wraps select). */
@@ -563,7 +845,7 @@ int main(void) {
       if (got > 0) {
         char action[64];
         if (parse_action(msg, action, sizeof(action))) {
-          handle_action(game, action);
+          handle_action(game, action, msg);
           dirty = 1;
         }
       }
