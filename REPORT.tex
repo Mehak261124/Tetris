@@ -1,0 +1,363 @@
+\documentclass[conference]{IEEEtran}
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{array}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!10},
+  keywordstyle=\color{blue},
+  commentstyle=\color{green!50!black},
+  stringstyle=\color{red!60!black},
+}
+
+\title{Tetris OS Simulator: A Custom Operating System\\Module Demonstration Using Game Engine Architecture}
+\author{
+  \IEEEauthorblockN{Mehak Jain, Anuj Kumar Singh}
+  \IEEEauthorblockA{Operating System}
+}
+
+\begin{document}
+
+\maketitle
+
+% ============================================================================
+\begin{abstract}
+This paper presents the design, implementation, and evaluation of \textbf{Tetris OS Simulator} --- a fully-functional Tetris game engine built from scratch in C without standard library dependencies for core logic. The project simulates seven fundamental operating system modules: Process Management, Memory Management, File Systems, I/O Management, Error Handling \& Security, Networking, and User Interface. The engine runs in two modes --- a terminal-based interface using ANSI escape codes and a WebSocket-backed browser client using React. Six custom libraries (\texttt{memory.c}, \texttt{string.c}, \texttt{math.c}, \texttt{screen.c}, \texttt{keyboard.c}, \texttt{sound.c}) replace all standard library functionality, while a hardware abstraction layer confines POSIX networking to dedicated I/O modules. The system demonstrates arena-based dynamic memory allocation, persistent file-based leaderboards, real-time WebSocket communication with automatic reconnection, and comprehensive error handling across all subsystems.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Operating Systems, Custom Libraries, Memory Management, WebSocket, Tetris, Process Scheduling, Hardware Abstraction
+\end{IEEEkeywords}
+
+% ============================================================================
+\section{Introduction}
+
+\subsection{Problem Statement}
+Standard game engines rely heavily on standard library functions (\texttt{malloc}, \texttt{strlen}, \texttt{sin}, etc.) and opaque frameworks. This project challenges that paradigm by implementing a complete game system where all core logic is built from first principles --- custom arithmetic, custom string operations, custom memory allocation, and custom I/O drivers.
+
+\subsection{Objectives}
+\begin{enumerate}
+  \item Implement six custom foundational libraries replacing \texttt{<string.h>}, \texttt{<math.h>}, and \texttt{malloc/free}.
+  \item Build a complete Tetris game engine demonstrating all seven OS module categories.
+  \item Provide dual I/O modes: terminal (ANSI) and browser (WebSocket).
+  \item Ensure robust error handling, edge-case coverage, and graceful degradation.
+  \item Maintain persistent state across sessions (file system module).
+  \item Support real-time client-server communication (networking module).
+\end{enumerate}
+
+\subsection{Scope}
+The project covers the complete lifecycle of an OS-like system: boot (memory initialization), process scheduling (game loop), I/O device management (keyboard/screen/speaker), persistent storage (leaderboard files), and graceful shutdown (memory cleanup, socket release).
+
+% ============================================================================
+\section{System Architecture}
+
+The system follows a layered architecture where each custom library represents an OS module:
+
+\begin{lstlisting}[language=C,caption={System Architecture Layers}]
+Application Layer:  ws_tetris.c / main.c
+Core Library Layer: string.c | math.c | memory.c
+HAL Layer:          screen.c | keyboard.c | sound.c
+Host OS / Hardware: POSIX sockets | Terminal | Audio
+\end{lstlisting}
+
+\textbf{Design Principle:} Game logic never includes networking headers, POSIX headers, or standard library functions beyond \texttt{<stdio.h>} and \texttt{<stdlib.h>}. All I/O flows through the Hardware Abstraction Layer (HAL).
+
+% ============================================================================
+\section{Methodology: Seven OS Modules}
+
+% ---- Module 1 ----
+\subsection{Module 1: Process Management}
+Process management determines \textit{who gets to run, when, and where}. The game loop acts as a cooperative scheduler executing three processes each tick:
+
+\begin{table}[h]
+\centering
+\caption{Process Schedule}
+\begin{tabular}{lll}
+\toprule
+\textbf{Process} & \textbf{Priority} & \textbf{Frequency} \\
+\midrule
+Input Polling & Highest & Every tick (50ms) \\
+Physics/Gravity & Medium & Level-dependent \\
+Rendering & Lowest & On state change \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Speed Curve (NES-style):}
+\begin{itemize}
+  \item Level 1--8: \texttt{drop\_ticks = max(13 - level, 5)} --- 600ms to 250ms
+  \item Level 9--13: \texttt{drop\_ticks = max(8 - (level-8)/2, 2)} --- 150ms to 100ms
+  \item Level 14+: \texttt{drop\_ticks = 1} --- 50ms (maximum speed)
+\end{itemize}
+
+\textbf{Lock Delay:} A 10-tick (500ms) timer prevents instant locking. The timer resets on successful moves/rotations (capped at 15 resets).
+
+\textbf{DAS/ARR:} Delayed Auto Shift (170ms delay) followed by Auto Repeat Rate (50ms interval) for smooth key repeat.
+
+% ---- Module 2 ----
+\subsection{Module 2: Memory Management}
+Memory management determines \textit{who owns which memory and how much}.
+
+\textbf{Design:} First-Fit Free-List Allocator with Block Splitting \& Coalescing.
+
+\begin{lstlisting}[language=C,caption={BlockHeader Structure}]
+typedef struct BlockHeader {
+    int                  size;
+    int                  is_free;
+    struct BlockHeader  *next;
+} BlockHeader;
+\end{lstlisting}
+
+\textbf{Operations:}
+\begin{itemize}
+  \item \texttt{memory\_init(65536)} --- acquires one 64KB slab via the single permitted \texttt{malloc()}.
+  \item \texttt{t\_alloc(size)} --- first-fit search with 8-byte alignment; splits oversized blocks.
+  \item \texttt{t\_dealloc(ptr)} --- validates pointer ownership, marks free, coalesces adjacent free blocks.
+  \item \texttt{memory\_cleanup()} --- releases the slab back to the host OS.
+\end{itemize}
+
+\textbf{Safety guarantees:} Alignment to 8-byte boundaries, pointer validation via block-list walk, double-free detection, out-of-bounds rejection, and NULL returns on failure.
+
+% ---- Module 3 ----
+\subsection{Module 3: File System}
+The file system provides \textit{persistent storage} for scores and leaderboard history.
+
+\begin{itemize}
+  \item \textbf{High Score File} (\texttt{highscore.txt}) --- terminal mode persists best score using \texttt{fopen/fgetc/fclose}.
+  \item \textbf{Leaderboard File} (\texttt{leaderboard.txt}) --- WebSocket mode stores top 10 entries sorted by score.
+  \item \textbf{Format:} \texttt{score|level|lines|name} (pipe-delimited, one entry per line).
+  \item \textbf{Edge cases:} Missing file starts empty, malformed lines use safe defaults, write failures degrade gracefully.
+\end{itemize}
+
+% ---- Module 4 ----
+\subsection{Module 4: I/O Management}
+I/O management defines \textit{how this computer talks to the world} --- screen, keyboard, and speaker.
+
+\begin{table}[h]
+\centering
+\caption{I/O Device Mapping}
+\begin{tabular}{lll}
+\toprule
+\textbf{Device} & \textbf{Terminal} & \textbf{WebSocket} \\
+\midrule
+Keyboard & \texttt{getchar()} raw & \texttt{recv()} + decode \\
+Screen & ANSI escapes & WebSocket frames \\
+Speaker & WAV + \texttt{afplay} & Web Audio API \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Audio:} The terminal generates square-wave WAV files using pure integer arithmetic (no \texttt{<math.h>}), while the web client uses Web Audio API oscillators with an identical Korobeiniki melody.
+
+% ---- Module 5 ----
+\subsection{Module 5: Error Handling \& Security}
+Error handling ensures \textit{graceful behaviour when things go wrong}.
+
+\begin{table}[h]
+\centering
+\caption{Error Handling Matrix}
+\begin{tabular}{ll}
+\toprule
+\textbf{Error Category} & \textbf{Handler} \\
+\midrule
+Division by zero & Returns 0 safely \\
+Memory OOM & NULL-checked, graceful exit \\
+Board out-of-bounds & \texttt{t\_in\_bounds()} guards \\
+Buffer overflow & \texttt{t\_strncpy()} with max-length \\
+Double-free & Silently ignored \\
+Invalid pointer free & Validated against block list \\
+Client disconnect & Re-accept without restart \\
+Malformed JSON & Silently dropped \\
+Handshake failure & Retry with next client \\
+SIGINT & Terminal state restored \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---- Module 6 ----
+\subsection{Module 6: Networking}
+Networking defines \textit{how this computer talks to another computer}.
+
+\textbf{Protocol:} WebSocket (RFC 6455) over TCP.
+
+\textbf{Key features:}
+\begin{itemize}
+  \item Persistent server socket survives page refresh.
+  \item Auto-reconnect client with 1.5s backoff.
+  \item Full RFC 6455: SHA-1 handshake, masked frame decode, opcode handling.
+  \item JSON state protocol: full game state serialized every dirty tick.
+  \item Hardware abstraction: all socket headers confined to \texttt{screen.c} and \texttt{keyboard.c}.
+\end{itemize}
+
+% ---- Module 7 ----
+\subsection{Module 7: User Interface}
+The user interface defines \textit{how a user interacts with the game}.
+
+\textbf{Terminal UI:} ANSI-colored 10x20 board with piece-type colors, ghost piece, next piece preview, HUD panel, game-over overlay, player name entry, sound effects, and background music.
+
+\textbf{Web UI:} React + Vite with CRT scanline aesthetic, 4 selectable themes (Neon, Retro, Mono, Pastel), hold piece, ghost piece, 7-bag randomizer, SRS wall kicks, lock delay, DAS/ARR, combo system, level-up animations, leaderboard, touch controls, SFX toggle, and background music toggle.
+
+% ============================================================================
+\section{Implementation Details}
+
+\subsection{Custom Library Pipeline}
+\begin{lstlisting}[caption={Data Flow Pipeline}]
+Input    -> keyboard.c  (captures raw input)
+Parsing  -> string.c    (t_strcmp, t_itoa, t_strlen)
+State    -> memory.c    (t_alloc for Game struct)
+Logic    -> math.c      (t_mul, t_mod, t_div)
+Output   -> screen.c    (ANSI / WebSocket frames)
+Audio    -> sound.c     (WAV generation / Web Audio)
+\end{lstlisting}
+
+\subsection{Gameplay Mechanics}
+
+\begin{table}[h]
+\centering
+\caption{Gameplay Feature Matrix}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Feature} & \textbf{Terminal} & \textbf{Web} \\
+\midrule
+7 Tetrominoes & \checkmark & \checkmark \\
+Ghost Piece & \checkmark & \checkmark \\
+Soft/Hard Drop & \checkmark & \checkmark \\
+Level Progression & \checkmark & \checkmark \\
+Sound Effects & \checkmark & \checkmark \\
+Background Music & \checkmark & \checkmark \\
+Player Name Entry & \checkmark & \checkmark \\
+Score Persistence & \checkmark & \checkmark \\
+Pause/Resume & \checkmark & \checkmark \\
+SRS Wall Kicks & Basic & Full SRS \\
+Hold Piece & \checkmark & \checkmark \\
+7-Bag Randomizer & \checkmark & \checkmark \\
+Lock Delay & \checkmark & \checkmark \\
+DAS/ARR & $-$ & \checkmark \\
+Combo System & \checkmark & \checkmark \\
+Leaderboard & \checkmark & \checkmark \\
+Theme Switcher & \checkmark & \checkmark \\
+Touch Controls & $-$ & \checkmark \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Technology Stack}
+
+\begin{table}[h]
+\centering
+\caption{Technology Components}
+\begin{tabular}{ll}
+\toprule
+\textbf{Component} & \textbf{Technology} \\
+\midrule
+Backend & C (gcc -Wall -Wextra -O2) \\
+Frontend & React 18 + Vite \\
+Transport & WebSocket (RFC 6455) \\
+Audio & WAV / Web Audio API \\
+Persistence & Plain text files \\
+Build & Make / npm \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================================
+\section{Results and Testing}
+
+\subsection{Compilation}
+Both build targets compile with zero warnings under strict flags: \texttt{gcc -Wall -Wextra} (terminal) and \texttt{gcc -Wall -Wextra -O2} (backend).
+
+\subsection{Edge Cases Verified}
+
+\begin{table}[h]
+\centering
+\caption{Test Results}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Test Case} & \textbf{Expected} & \textbf{Result} \\
+\midrule
+Division by zero & Returns 0 & Pass \\
+\texttt{t\_alloc(0)} & Returns NULL & Pass \\
+\texttt{t\_dealloc(NULL)} & No-op & Pass \\
+Double-free & Ignored & Pass \\
+Page refresh & Re-accepts & Pass \\
+Empty leaderboard & Starts empty & Pass \\
+Name overflow (>20) & Truncated & Pass \\
+Wall kick rotation & 5 tests & Pass \\
+Hold twice per turn & Blocked & Pass \\
+Malformed WebSocket & Dropped & Pass \\
+Memory exhaustion & NULL logged & Pass \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Performance}
+\begin{itemize}
+  \item Game loop tick rate: 50ms (20 Hz physics)
+  \item WebSocket frame size: 2--4 KB per state update
+  \item Memory footprint: 64 KB arena (game state < 2 KB)
+  \item Frontend bundle: < 100 KB (production)
+\end{itemize}
+
+% ============================================================================
+\section{Future Scope}
+
+\begin{enumerate}
+  \item \textbf{Multiplayer Mode:} Extend WebSocket server for concurrent clients with garbage-line mechanics.
+  \item \textbf{T-Spin Detection:} Implement 4-corner T-spin scoring (infrastructure already in place with \texttt{last\_was\_rotate} flag).
+  \item \textbf{Sprint Mode:} Timed 40-line clear challenge demonstrating advanced process scheduling.
+  \item \textbf{Replay System:} Record inputs with timestamps for playback (file system extension).
+  \item \textbf{Cross-Platform Audio:} Replace macOS \texttt{afplay} with portable PCM output.
+  \item \textbf{WebRTC Signaling:} Peer-to-peer multiplayer over the internet.
+  \item \textbf{Persistent Sessions:} Token-based session tracking across server restarts.
+\end{enumerate}
+
+% ============================================================================
+\section{Conclusion}
+
+The Tetris OS Simulator successfully demonstrates all seven fundamental OS module categories through a practical, interactive application. By replacing all standard library functions with custom implementations, the project provides deep understanding of how operating systems manage processes, memory, I/O devices, file systems, and error conditions. The dual-mode architecture (terminal + WebSocket) showcases hardware abstraction principles, while the persistent leaderboard and real-time networking demonstrate file system and communication protocol implementations. Both build targets compile with zero warnings, and comprehensive edge-case testing confirms robust error handling across all subsystems.
+
+% ============================================================================
+\begin{thebibliography}{10}
+
+\bibitem{c99}
+ANSI/ISO 9899:1999, \textit{Programming Languages --- C}, International Organization for Standardization, 1999.
+
+\bibitem{rfc6455}
+I. Fette and A. Melnikov, ``The WebSocket Protocol,'' IETF RFC 6455, Dec. 2011. [Online]. Available: \url{https://tools.ietf.org/html/rfc6455}
+
+\bibitem{sha1}
+D. Eastlake and P. Jones, ``US Secure Hash Algorithm 1 (SHA-1),'' IETF RFC 3174, Sep. 2001.
+
+\bibitem{guideline}
+The Tetris Company, \textit{Tetris Guideline}, 2009. [Online]. Available: \url{https://tetris.wiki/Tetris_Guideline}
+
+\bibitem{tanenbaum}
+A. S. Tanenbaum and H. Bos, \textit{Modern Operating Systems}, 4th ed. Upper Saddle River, NJ: Pearson, 2014.
+
+\bibitem{stallings}
+W. Stallings, \textit{Operating Systems: Internals and Design Principles}, 9th ed. Upper Saddle River, NJ: Pearson, 2017.
+
+\bibitem{kr}
+B. W. Kernighan and D. M. Ritchie, \textit{The C Programming Language}, 2nd ed. Englewood Cliffs, NJ: Prentice Hall, 1988.
+
+\bibitem{react}
+React Team, ``React Documentation,'' Meta Open Source, 2024. [Online]. Available: \url{https://react.dev}
+
+\bibitem{tls}
+E. Rescorla, ``HTTP Over TLS,'' IETF RFC 2818, May 2000.
+
+\bibitem{knuth}
+D. E. Knuth, \textit{The Art of Computer Programming, Vol. 2: Seminumerical Algorithms}, 3rd ed. Boston, MA: Addison-Wesley, 1997.
+
+\end{thebibliography}
+
+\end{document}
