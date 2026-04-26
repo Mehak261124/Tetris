@@ -13,6 +13,19 @@ const PIECE_INDEX = {
 
 const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8080";
 
+/* DAS (Delayed Auto Shift) / ARR (Auto Repeat Rate) — in milliseconds */
+const DAS_DELAY = 170;
+const ARR_RATE  = 50;
+const REPEATABLE_ACTIONS = new Set(["move_left", "move_right", "soft_drop"]);
+
+/* Theme definitions — CSS custom property overrides */
+const THEMES = {
+  neon: { label: "Neon", className: "" },
+  retro: { label: "Retro", className: "theme-retro" },
+  mono:  { label: "Mono", className: "theme-mono" },
+  pastel:{ label: "Pastel", className: "theme-pastel" },
+};
+
 /* =============================================================================
  * WEB AUDIO — Sound Effects matching terminal sound.c
  * =============================================================================
@@ -52,9 +65,15 @@ const SFX = {
     playTone(110, 0.12, "square", 0.1);
     setTimeout(() => playTone(80, 0.1, "square", 0.08), 40);
   },
+  hold: () => playTone(330, 0.1, "triangle", 0.06),
   clear: () => {
     [523, 659, 784, 1047].forEach((f, i) =>
       setTimeout(() => playTone(f, 0.12, "square", 0.07), i * 60)
+    );
+  },
+  levelUp: () => {
+    [392, 494, 587, 784].forEach((f, i) =>
+      setTimeout(() => playTone(f, 0.15, "triangle", 0.08), i * 80)
     );
   },
   gameover: () => {
@@ -63,6 +82,47 @@ const SFX = {
     );
   },
 };
+
+/* =============================================================================
+ * BACKGROUND MUSIC — Korobeiniki melody via Web Audio oscillators
+ * ============================================================================= */
+const MELODY = [
+  /* [freq, duration_ms] — simplified Korobeiniki (Type A) */
+  [659,400],[494,200],[523,200],[587,400],[523,200],[494,200],
+  [440,400],[440,200],[523,200],[659,400],[587,200],[523,200],
+  [494,400],[494,200],[523,200],[587,400],[659,400],
+  [523,400],[440,400],[440,400],[0,400],
+  [587,400],[698,200],[880,400],[784,200],[698,200],
+  [659,400],[523,200],[659,400],[587,200],[523,200],
+  [494,400],[494,200],[523,200],[587,400],[659,400],
+  [523,400],[440,400],[440,400],[0,400],
+];
+
+class BGMusic {
+  constructor() {
+    this._playing = false;
+    this._timer = null;
+    this._idx = 0;
+  }
+  start() {
+    if (this._playing) return;
+    this._playing = true;
+    this._idx = 0;
+    this._tick();
+  }
+  stop() {
+    this._playing = false;
+    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+  }
+  _tick() {
+    if (!this._playing) return;
+    const [freq, dur] = MELODY[this._idx];
+    if (freq > 0) playTone(freq, dur / 1200, "square", 0.03);
+    this._idx = (this._idx + 1) % MELODY.length;
+    this._timer = setTimeout(() => this._tick(), dur);
+  }
+}
+const bgm = new BGMusic();
 
 /* =============================================================================
  * GRID HELPERS
@@ -136,10 +196,13 @@ const initialState = {
   currentPiece: null,
   ghostPiece: null,
   nextPiece: null,
+  heldPiece: null,
+  holdUsed: false,
   score: 0,
   highScore: 0,
   level: 1,
   lines: 0,
+  combo: 0,
   gameState: "playing",
   wsStatus: "connecting",
   playerName: "",
@@ -157,10 +220,13 @@ const reducer = (state, action) => {
         currentPiece: action.payload.currentPiece || null,
         ghostPiece: action.payload.ghostPiece || null,
         nextPiece: action.payload.nextPiece || null,
+        heldPiece: action.payload.heldPiece !== undefined ? action.payload.heldPiece : state.heldPiece,
+        holdUsed: action.payload.holdUsed !== undefined ? action.payload.holdUsed : state.holdUsed,
         score: Number.isFinite(action.payload.score) ? action.payload.score : 0,
         highScore: Number.isFinite(action.payload.highScore) ? action.payload.highScore : 0,
         level: Number.isFinite(action.payload.level) ? action.payload.level : 1,
         lines: Number.isFinite(action.payload.lines) ? action.payload.lines : 0,
+        combo: Number.isFinite(action.payload.combo) ? action.payload.combo : 0,
         gameState: action.payload.state || "playing",
         playerName: action.payload.playerName || state.playerName || "Player",
         leaderboard: Array.isArray(action.payload.leaderboard) ? action.payload.leaderboard : state.leaderboard,
@@ -182,6 +248,9 @@ const actionForKey = (event) => {
   if (code === "Space" || key === " " || key === "Spacebar") return "hard_drop";
   if (code === "KeyP" || key === "p" || key === "P") return "pause";
   if (code === "KeyR" || key === "r" || key === "R") return "restart";
+  if (code === "KeyC" || key === "c" || key === "C" ||
+      code === "ShiftLeft" || code === "ShiftRight" ||
+      key === "Shift") return "hold";
   return null;
 };
 
@@ -202,8 +271,12 @@ export default function App() {
   const [showStartScreen, setShowStartScreen] = useState(true);
   const [nameInput, setNameInput] = useState("");
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const [activeTab, setActiveTab] = useState("controls"); // "controls" | "leaderboard"
+  const [musicEnabled, setMusicEnabled] = useState(false);
+  const [activeTab, setActiveTab] = useState("controls");
+  const [theme, setTheme] = useState("neon");
+  const [levelUpFlash, setLevelUpFlash] = useState(false);
   const nameInputRef = useRef(null);
+  const prevLevel = useRef(state.level);
 
   const grid = useMemo(
     () => buildRenderGrid(state.board, state.currentPiece, state.ghostPiece),
@@ -234,6 +307,27 @@ export default function App() {
     }
     prevGameState.current = state.gameState;
   }, [state.gameState, soundEnabled, showStartScreen]);
+
+  /* ---- Level-up effect ---- */
+  useEffect(() => {
+    if (state.level > prevLevel.current && prevLevel.current > 0) {
+      if (soundEnabled) SFX.levelUp();
+      setLevelUpFlash(true);
+      const t = setTimeout(() => setLevelUpFlash(false), 600);
+      return () => clearTimeout(t);
+    }
+    prevLevel.current = state.level;
+  }, [state.level, soundEnabled]);
+
+  /* ---- Background music lifecycle ---- */
+  useEffect(() => {
+    if (musicEnabled && !showStartScreen && state.gameState === "playing") {
+      bgm.start();
+    } else {
+      bgm.stop();
+    }
+    return () => bgm.stop();
+  }, [musicEnabled, showStartScreen, state.gameState]);
 
   /* ---- Score flash ---- */
   useEffect(() => {
@@ -297,8 +391,30 @@ export default function App() {
       if (action === "move_left" || action === "move_right") SFX.move();
       else if (action === "rotate") SFX.rotate();
       else if (action === "hard_drop") SFX.drop();
+      else if (action === "hold") SFX.hold();
     }
   }, [soundEnabled]);
+
+  /* ---- DAS / ARR — Delayed Auto Shift + Auto Repeat Rate ---- */
+  const dasRef = useRef({ key: null, dasTimer: null, arrTimer: null });
+
+  const clearDAS = useCallback(() => {
+    const d = dasRef.current;
+    if (d.dasTimer) { clearTimeout(d.dasTimer); d.dasTimer = null; }
+    if (d.arrTimer) { clearInterval(d.arrTimer); d.arrTimer = null; }
+    d.key = null;
+  }, []);
+
+  const startDAS = useCallback((action) => {
+    clearDAS();
+    const d = dasRef.current;
+    d.key = action;
+    d.dasTimer = setTimeout(() => {
+      d.arrTimer = setInterval(() => {
+        sendAction(action);
+      }, ARR_RATE);
+    }, DAS_DELAY);
+  }, [sendAction, clearDAS]);
 
   const handleKeyDown = useCallback(
     (event) => {
@@ -308,15 +424,37 @@ export default function App() {
       if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space"].includes(event.code)) {
         event.preventDefault();
       }
-      sendAction(action);
+      /* DAS: only fire once on initial press for repeatable actions */
+      if (REPEATABLE_ACTIONS.has(action)) {
+        if (dasRef.current.key === action) return; /* already repeating */
+        sendAction(action);
+        startDAS(action);
+      } else {
+        sendAction(action);
+      }
     },
-    [sendAction, showStartScreen]
+    [sendAction, showStartScreen, startDAS]
+  );
+
+  const handleKeyUp = useCallback(
+    (event) => {
+      const action = actionForKey(event);
+      if (action && dasRef.current.key === action) {
+        clearDAS();
+      }
+    },
+    [clearDAS]
   );
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleKeyDown]);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      clearDAS();
+    };
+  }, [handleKeyDown, handleKeyUp, clearDAS]);
 
   /* ---- Focus name input on start screen ---- */
   useEffect(() => {
@@ -407,8 +545,9 @@ export default function App() {
   }
 
   /* ====================== MAIN GAME ====================== */
+  const themeClass = THEMES[theme]?.className || "";
   return (
-    <div className="game-wrapper">
+    <div className={`game-wrapper ${themeClass}`}>
       <div className="game-layout">
         {/* -- Left: Game Board -- */}
         <div className="game-column">
@@ -479,11 +618,21 @@ export default function App() {
                     </button>
                     <button
                       className="overlay-button overlay-button-secondary"
-                      onClick={() => setActiveTab("leaderboard")}
+                      onClick={() => {
+                        sendAction("restart");
+                        setShowStartScreen(true);
+                        setNameInput("");
+                      }}
                     >
-                      Leaderboard
+                      New Game
                     </button>
                   </div>
+                  <button
+                    className="overlay-link"
+                    onClick={() => setActiveTab("leaderboard")}
+                  >
+                    🏆 View Leaderboard
+                  </button>
                 </div>
               </div>
             )}
@@ -499,6 +648,7 @@ export default function App() {
             </div>
             <div className="touch-row">
               <button className="touch-btn touch-btn-wide" onClick={() => sendAction("hard_drop")}>DROP</button>
+              <button className="touch-btn" onClick={() => sendAction("hold")}>⬡</button>
               <button className="touch-btn" onClick={() => sendAction("pause")}>⏸</button>
               <button className="touch-btn" onClick={() => sendAction("restart")}>↻</button>
             </div>
@@ -507,37 +657,73 @@ export default function App() {
 
         {/* -- Right: Side Panel -- */}
         <div className="side-panel">
-          <div className="panel-block">
-            <div className="panel-title">Next Piece</div>
-            <NextPiecePreview nextPiece={state.nextPiece} />
+          {/* Hold + Next in a compact row */}
+          <div className="preview-row">
+            <div className={`panel-block panel-compact ${state.holdUsed ? "hold-used" : ""}`}>
+              <div className="panel-title">Hold <span className="hold-key-hint">[C]</span></div>
+              <HoldPiecePreview heldPiece={state.heldPiece} holdUsed={state.holdUsed} />
+            </div>
+            <div className="panel-block panel-compact">
+              <div className="panel-title">Next</div>
+              <NextPiecePreview nextPiece={state.nextPiece} />
+            </div>
           </div>
 
           <div className="panel-block">
-            <div className="panel-title">Score</div>
-            <div className={`panel-value ${scoreFlash ? "score-flash" : ""}`}>
-              {state.score}
+            <div className="stats-grid">
+              <div className="stat-item">
+                <div className="panel-title">Score</div>
+                <div className={`panel-value ${scoreFlash ? "score-flash" : ""}`}>{state.score}</div>
+              </div>
+              <div className="stat-item">
+                <div className="panel-title">Best</div>
+                <div className={`panel-value highscore-value ${isNewHighScore ? "highscore-glow" : ""}`}>{state.highScore}</div>
+              </div>
+              <div className="stat-item">
+                <div className="panel-title">Level</div>
+                <div className={`panel-value ${levelUpFlash ? "level-up-flash" : ""}`}>{state.level}</div>
+              </div>
+              <div className="stat-item">
+                <div className="panel-title">Lines</div>
+                <div className="panel-value">{state.lines}</div>
+              </div>
             </div>
-            <div className="panel-title" style={{ marginTop: "clamp(6px, 1vmin, 16px)" }}>
-              Best
-            </div>
-            <div className={`panel-value highscore-value ${isNewHighScore ? "highscore-glow" : ""}`}>
-              {state.highScore}
-            </div>
-            <div className="panel-title" style={{ marginTop: "clamp(6px, 1vmin, 16px)" }}>Level</div>
-            <div className="panel-value">{state.level}</div>
-            <div className="panel-title" style={{ marginTop: "clamp(6px, 1vmin, 16px)" }}>Lines</div>
-            <div className="panel-value">{state.lines}</div>
+            {state.combo > 1 && (
+              <div className="combo-indicator">🔥 {state.combo}x Combo!</div>
+            )}
           </div>
 
-          {/* Sound toggle */}
-          <button
-            id="sound-toggle"
-            className={`sound-toggle ${soundEnabled ? "sound-on" : "sound-off"}`}
-            onClick={() => setSoundEnabled((v) => !v)}
-            title={soundEnabled ? "Mute sounds" : "Unmute sounds"}
-          >
-            {soundEnabled ? "🔊" : "🔇"} Sound
-          </button>
+          {/* Sound + Music toggles */}
+          <div className="audio-row">
+            <button
+              id="sound-toggle"
+              className={`sound-toggle ${soundEnabled ? "sound-on" : "sound-off"}`}
+              onClick={() => setSoundEnabled((v) => !v)}
+              title={soundEnabled ? "Mute sounds" : "Unmute sounds"}
+            >
+              {soundEnabled ? "🔊" : "🔇"} SFX
+            </button>
+            <button
+              className={`sound-toggle ${musicEnabled ? "sound-on" : "sound-off"}`}
+              onClick={() => setMusicEnabled((v) => !v)}
+              title={musicEnabled ? "Stop music" : "Play music"}
+            >
+              {musicEnabled ? "🎵" : "⏹"} Music
+            </button>
+          </div>
+
+          {/* Theme picker */}
+          <div className="theme-picker">
+            {Object.entries(THEMES).map(([key, t]) => (
+              <button
+                key={key}
+                className={`theme-btn ${theme === key ? "theme-active" : ""}`}
+                onClick={() => setTheme(key)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
 
           {/* Tab switcher: Controls / Leaderboard */}
           <div className="tab-switcher">
@@ -562,6 +748,7 @@ export default function App() {
                 <li>↑ : Rotate</li>
                 <li>↓ : Soft Drop</li>
                 <li>Space: Hard Drop</li>
+                <li>C/Shift: Hold</li>
                 <li>P: Pause</li>
                 <li>R: Restart</li>
               </ul>
@@ -575,7 +762,7 @@ export default function App() {
                 <div className="lb-empty">No scores yet</div>
               ) : (
                 <div className="lb-list">
-                  {state.leaderboard.map((entry, i) => (
+                  {state.leaderboard.slice(0, 5).map((entry, i) => (
                     <div
                       key={i}
                       className={`lb-row ${entry.name === state.playerName ? "lb-highlight" : ""}`}
@@ -612,6 +799,34 @@ function NextPiecePreview({ nextPiece }) {
   );
   return (
     <div className="preview-grid">
+      {grid.map((row, rowIndex) =>
+        row.map((cell, colIndex) => (
+          <div
+            key={`${rowIndex}-${colIndex}`}
+            className="cell"
+            data-type={cell}
+            data-ghost="false"
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
+/* =============================================================================
+ * HOLD PIECE PREVIEW
+ * ============================================================================= */
+function HoldPiecePreview({ heldPiece, holdUsed }) {
+  const shape = heldPiece?.shape || [];
+  const typeIndex = pieceTypeToIndex(heldPiece);
+  const grid = Array.from({ length: PREVIEW_SIZE }, (_, r) =>
+    Array.from({ length: PREVIEW_SIZE }, (_, c) => {
+      const filled = shape[r]?.[c] ? 1 : 0;
+      return filled ? typeIndex : 0;
+    })
+  );
+  return (
+    <div className={`preview-grid ${holdUsed ? "hold-dimmed" : ""}`}>
       {grid.map((row, rowIndex) =>
         row.map((cell, colIndex) => (
           <div
