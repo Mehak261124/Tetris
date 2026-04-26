@@ -13,6 +13,7 @@ backend/tetris_ws
 
 # Runtime files
 highscore.txt
+backend/leaderboard.txt
 
 # Node / frontend artifacts
 ui/node_modules/

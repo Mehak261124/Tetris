@@ -56,6 +56,9 @@ void screen_get_size(int *cols, int *rows); /* query terminal dimensions */
  */
 
 int screen_server_start(int port);    /* start WS server, return fd  */
+int screen_server_listen(int port);   /* bind+listen, return server_fd */
+int screen_server_accept(int srv_fd); /* accept one client, return fd */
+void screen_server_close(int srv_fd); /* close the server socket      */
 void screen_init_ws(int socket_fd);   /* set socket as output target */
 int screen_ws_handshake(void);        /* perform WS upgrade          */
 int screen_send_ws(const char *json); /* send a WS text frame        */

@@ -457,17 +457,13 @@ int screen_send_ws(const char *json) {
 }
 
 /* ---------------------------------------------------------------------------
- * screen_server_start(port)
- *   Creates and configures a TCP server socket, binds to the given port,
- *   listens for one client, and accepts the connection.
- *   Returns the connected client file descriptor on success, -1 on error.
- *
- *   This wraps the one-time server bootstrap (socket/bind/listen/accept)
- *   inside the hardware abstraction layer — analogous to initialising
- *   a display device before rendering frames.
+ * screen_server_listen(port)
+ *   Creates a TCP server socket, binds to the given port, and starts
+ *   listening.  Returns the server file descriptor on success, -1 on error.
+ *   The caller should later call screen_server_accept() to accept a client.
  * ---------------------------------------------------------------------------
  */
-int screen_server_start(int port) {
+int screen_server_listen(int port) {
   int server_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (server_fd < 0)
     return -1;
@@ -489,14 +485,46 @@ int screen_server_start(int port) {
     close(server_fd);
     return -1;
   }
+  return server_fd;
+}
 
-  int client_fd = accept(server_fd, NULL, NULL);
+/* ---------------------------------------------------------------------------
+ * screen_server_accept(server_fd)
+ *   Accepts a single client connection on the listening socket.
+ *   Returns the client file descriptor on success, -1 on error.
+ * ---------------------------------------------------------------------------
+ */
+int screen_server_accept(int srv_fd) {
+  if (srv_fd < 0)
+    return -1;
+  return accept(srv_fd, NULL, NULL);
+}
+
+/* ---------------------------------------------------------------------------
+ * screen_server_close(server_fd)
+ *   Closes the server socket.
+ * ---------------------------------------------------------------------------
+ */
+void screen_server_close(int srv_fd) {
+  if (srv_fd >= 0)
+    close(srv_fd);
+}
+
+/* ---------------------------------------------------------------------------
+ * screen_server_start(port)
+ *   Convenience wrapper: listen + accept in one call.
+ *   Closes the server socket after accepting (legacy behaviour).
+ * ---------------------------------------------------------------------------
+ */
+int screen_server_start(int port) {
+  int srv = screen_server_listen(port);
+  if (srv < 0)
+    return -1;
+  int client_fd = screen_server_accept(srv);
   if (client_fd < 0) {
-    close(server_fd);
+    close(srv);
     return -1;
   }
-
-  /* Store server_fd internally so we can close it later if needed. */
-  close(server_fd);
+  close(srv);
   return client_fd;
 }

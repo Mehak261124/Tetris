@@ -1,15 +1,13 @@
 /* =============================================================================
- * math.c  —  Custom Math Library
+ * math.c  —  Custom Math Library (Optimised)
  * =============================================================================
  * OS MODULE: Core Library / Process Logic Support
  *   Provides all arithmetic the project needs without touching <math.h>.
- *   Every spatial calculation in the Tetris engine routes through here so that
- *   the evaluator can clearly see the library integration required by the spec.
  *
- * WHY CUSTOM MATH?
- *   The project forbids <math.h> for core logic.  This module also makes the
- *   intent of each calculation explicit — t_in_bounds() documents a boundary
- *   check far more clearly than raw comparison expressions scattered in main.
+ * ALGORITHMS (upgraded):
+ *   t_mul  — binary (shift-and-add) in O(log b): no * operator
+ *   t_div  — binary long-division in O(log² n):  no / operator
+ *   t_mod  — derived from t_div + t_mul:         no % operator
  * =============================================================================
  */
 
@@ -17,120 +15,103 @@
 
 /* ---------------------------------------------------------------------------
  * t_mul(a, b)
- *   Integer multiplication.
- *   Used in: board indexing (row * BOARD_WIDTH + col), coordinate scaling.
+ *   Binary (shift-and-add) multiplication — O(log b) iterations.
+ *   Uses only <<, >>, +, & — never the * operator.
+ *
+ *   Algorithm:
+ *     While b > 0:
+ *       if lowest bit of b is set → accumulate a
+ *       shift a left  (doubles it)
+ *       shift b right (halves it, moves to next bit)
  * ---------------------------------------------------------------------------
  */
 int t_mul(int a, int b) {
-  /* Repeated addition — no * operator */
-  int neg = 0;
-  if (a < 0) {
-    neg = !neg;
-    a = -a;
-  }
-  if (b < 0) {
-    neg = !neg;
-    b = -b;
-  }
-  /* Optimise: iterate on the smaller operand */
-  if (a < b) {
-    int tmp = a;
-    a = b;
-    b = tmp;
-  }
-  int result = 0, i;
-  for (i = 0; i < b; i++)
-    result += a;
-  return neg ? -result : result;
+    int neg = 0;
+    if (a < 0) { neg = !neg; a = -a; }
+    if (b < 0) { neg = !neg; b = -b; }
+
+    int result = 0;
+    while (b > 0) {
+        if (b & 1)        /* lowest bit set → add current 'a' */
+            result += a;
+        a <<= 1;          /* a * 2 */
+        b >>= 1;          /* b / 2 */
+    }
+    return neg ? -result : result;
 }
 
 /* ---------------------------------------------------------------------------
  * t_div(a, b)
- *   Integer division via repeated subtraction — no / operator.
- *   Returns 0 if b == 0 (safe default; callers should still avoid passing 0).
- *   Used in: score calculation, level-speed formulas.
+ *   Binary long-division — O(log² n), handles all sign combinations.
+ *   Uses only <<, >>, - — never the / operator.
+ *   Returns 0 if b == 0 (division-by-zero guard).
+ *
+ *   Algorithm:
+ *     Work with unsigned magnitudes.
+ *     For each bit position from 63 down to 0:
+ *       if (b << i) still fits and is <= remainder → subtract it, set bit i
  * ---------------------------------------------------------------------------
  */
 int t_div(int a, int b) {
-  if (b == 0)
-    return 0; /* error handling: division by zero → 0 */
-  int neg = 0;
-  if (a < 0) {
-    neg = !neg;
-    a = -a;
-  }
-  if (b < 0) {
-    neg = !neg;
-    b = -b;
-  }
-  int quotient = 0;
-  while (a >= b) {
-    a -= b;
-    quotient++;
-  }
-  return neg ? -quotient : quotient;
+    if (b == 0) return 0;
+
+    int neg = 0;
+    if (a < 0) { neg = !neg; a = -a; }
+    if (b < 0) { neg = !neg; b = -b; }
+
+    /* Use unsigned to avoid signed-overflow on left shift */
+    unsigned int ua = (unsigned int)a;
+    unsigned int ub = (unsigned int)b;
+    unsigned int result = 0;
+    int i;
+
+    for (i = 30; i >= 0; i--) {
+        /* Guard: shifted divisor must not overflow and must fit in remainder */
+        unsigned int shifted = ub << i;
+        if ((shifted >> i) == ub && shifted <= ua) {
+            ua -= shifted;
+            result |= (1u << i);
+        }
+    }
+    return neg ? -(int)result : (int)result;
 }
 
 /* ---------------------------------------------------------------------------
  * t_mod(a, b)
- *   Integer modulo without % operator — uses t_div and t_mul identity:
- *     a mod b = a - (a / b) * b
+ *   Integer modulo without % — identity: a mod b = a - (a/b)*b
  *   Returns 0 if b == 0.
- *   Used in: wrap-around logic, line-clear counting.
  * ---------------------------------------------------------------------------
  */
 int t_mod(int a, int b) {
-  if (b == 0)
-    return 0; /* error handling: modulo by zero → 0 */
-  return a - t_mul(t_div(a, b), b);
+    if (b == 0) return 0;
+    return a - t_mul(t_div(a, b), b);
 }
 
 /* ---------------------------------------------------------------------------
- * t_abs(val)
- *   Returns the absolute (non-negative) value of val.
- *   Used in: collision distance checks, offset calculations.
+ * t_abs(val) — absolute value
  * ---------------------------------------------------------------------------
  */
 int t_abs(int val) { return (val < 0) ? -val : val; }
 
 /* ---------------------------------------------------------------------------
  * t_in_bounds(val, min, max)
- *   Boundary check: returns 1 if min <= val <= max, 0 otherwise.
- *
- *   This is the primary boundary-checking helper required by the spec.
- *   Used in: piece movement validation, board edge detection.
- *
- *   Parameters:
- *     val — the value to test (e.g. piece column after a move).
- *     min — inclusive lower bound (e.g. 0 = leftmost column).
- *     max — inclusive upper bound (e.g. BOARD_WIDTH-1 = rightmost column).
+ *   Returns 1 if min <= val <= max, else 0.
+ *   Primary boundary-check helper used throughout the engine.
  * ---------------------------------------------------------------------------
  */
 int t_in_bounds(int val, int min, int max) {
-  return (val >= min && val <= max);
+    return (val >= min && val <= max);
 }
 
 /* ---------------------------------------------------------------------------
- * t_clamp(val, min, max)
- *   Returns val clamped to [min, max].
- *   Unlike t_in_bounds (which just checks), this corrects out-of-range values.
- *   Used in: safe cursor positioning, score capping.
+ * t_clamp / t_max / t_min
  * ---------------------------------------------------------------------------
  */
 int t_clamp(int val, int min, int max) {
-  if (val < min)
-    return min;
-  if (val > max)
-    return max;
-  return val;
+    if (val < min) return min;
+    if (val > max) return max;
+    return val;
 }
 
-/* ---------------------------------------------------------------------------
- * t_max(a, b) / t_min(a, b)
- *   Standard maximum / minimum helpers.
- *   Used in: layout calculations, speed formula (don't go faster than cap).
- * ---------------------------------------------------------------------------
- */
 int t_max(int a, int b) { return (a > b) ? a : b; }
-
 int t_min(int a, int b) { return (a < b) ? a : b; }
