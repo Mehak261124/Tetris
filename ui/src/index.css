@@ -48,7 +48,7 @@ body {
 .game-layout {
   display: flex;
   gap: clamp(12px, 2vw, 32px);
-  align-items: flex-start;
+  align-items: center;
   max-height: 100vh;
   max-height: 100dvh;
 }
@@ -187,16 +187,32 @@ body {
 .side-panel {
   display: flex;
   flex-direction: column;
-  gap: var(--panel-gap);
+  justify-content: center;
+  gap: clamp(8px, 1.2vmin, 14px);
   min-width: clamp(140px, 20vw, 240px);
+}
+
+/* Hold + Next side by side */
+.preview-row {
+  display: flex;
+  gap: clamp(6px, 0.8vmin, 10px);
+}
+
+.preview-row .panel-compact {
+  flex: 1;
+  min-width: 0;
 }
 
 .panel-block {
   background: rgba(8, 15, 25, 0.9);
   border: 1px solid rgba(0, 255, 255, 0.15);
   border-radius: 10px;
-  padding: clamp(8px, 1.2vmin, 16px);
+  padding: clamp(6px, 1vmin, 12px);
   box-shadow: 0 0 18px rgba(0, 255, 255, 0.08);
+}
+
+.panel-compact {
+  padding: clamp(4px, 0.8vmin, 10px);
 }
 
 .panel-title {
@@ -207,9 +223,37 @@ body {
 }
 
 .panel-value {
-  margin-top: clamp(4px, 0.6vmin, 8px);
+  margin-top: clamp(2px, 0.4vmin, 6px);
   font-size: var(--font-panel-value);
   color: #e0f2fe;
+}
+
+/* 2x2 Stats Grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(4px, 0.6vmin, 8px);
+}
+
+.stat-item {
+  padding: clamp(2px, 0.3vmin, 4px) 0;
+}
+
+/* Game-over leaderboard link */
+.overlay-link {
+  font-family: "Press Start 2P", monospace;
+  font-size: clamp(6px, 0.8vmin, 9px);
+  color: #64748b;
+  background: none;
+  border: none;
+  cursor: pointer;
+  margin-top: clamp(6px, 0.8vmin, 10px);
+  transition: color 0.2s;
+  text-decoration: none;
+}
+
+.overlay-link:hover {
+  color: #7dd3fc;
 }
 
 /* High score glow when player is beating the record */
@@ -243,6 +287,25 @@ body {
   grid-template-columns: repeat(4, var(--cell-size));
   grid-template-rows: repeat(4, var(--cell-size));
   gap: var(--cell-gap);
+}
+
+/* ============================================================================
+ * HOLD PIECE
+ * ============================================================================ */
+.hold-used {
+  opacity: 0.45;
+  border-color: rgba(100, 116, 139, 0.2);
+}
+
+.hold-dimmed .cell[data-type]:not([data-type="0"]) {
+  filter: saturate(0.3) brightness(0.6);
+}
+
+.hold-key-hint {
+  font-size: clamp(5px, 0.7vmin, 8px);
+  color: #475569;
+  margin-left: 4px;
+  letter-spacing: 0;
 }
 
 /* ============================================================================
@@ -868,3 +931,165 @@ body {
     --cell-size: 36px;
   }
 }
+
+/* ============================================================================
+ * COMBO INDICATOR
+ * ============================================================================ */
+.combo-indicator {
+  margin-top: clamp(4px, 0.5vmin, 8px);
+  font-size: clamp(7px, 0.9vmin, 11px);
+  color: #fb923c;
+  text-align: center;
+  animation: combo-pulse 0.4s ease-in-out;
+  text-shadow: 0 0 8px rgba(251, 146, 60, 0.6);
+}
+
+@keyframes combo-pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+/* ============================================================================
+ * LEVEL-UP FLASH
+ * ============================================================================ */
+.level-up-flash {
+  animation: level-glow 0.6s ease-out;
+}
+
+@keyframes level-glow {
+  0% { color: #22d3ee; text-shadow: 0 0 20px #22d3ee; transform: scale(1.3); }
+  100% { color: #e0f2fe; text-shadow: none; transform: scale(1); }
+}
+
+/* ============================================================================
+ * AUDIO ROW (SFX + Music side by side)
+ * ============================================================================ */
+.audio-row {
+  display: flex;
+  gap: clamp(4px, 0.6vmin, 8px);
+}
+
+.audio-row .sound-toggle {
+  flex: 1;
+}
+
+/* ============================================================================
+ * THEME PICKER
+ * ============================================================================ */
+.theme-picker {
+  display: flex;
+  gap: clamp(3px, 0.4vmin, 6px);
+}
+
+.theme-btn {
+  flex: 1;
+  font-family: "Press Start 2P", monospace;
+  font-size: clamp(5px, 0.6vmin, 7px);
+  padding: clamp(3px, 0.4vmin, 6px) clamp(4px, 0.5vmin, 8px);
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(100, 116, 139, 0.3);
+  border-radius: 6px;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-transform: uppercase;
+}
+
+.theme-btn:hover {
+  border-color: rgba(125, 211, 252, 0.5);
+  color: #e0f2fe;
+}
+
+.theme-active {
+  border-color: #22d3ee;
+  color: #22d3ee;
+  background: rgba(34, 211, 238, 0.1);
+}
+
+/* ============================================================================
+ * THEME: RETRO (warm NES tones)
+ * ============================================================================ */
+.theme-retro {
+  --bg-color: #1a1106;
+}
+.theme-retro .game-wrapper {
+  background: radial-gradient(ellipse at center, #2d1f0e 0%, #1a1106 70%, #0d0a03 100%);
+}
+.theme-retro .board-container {
+  border-color: rgba(255, 165, 0, 0.25);
+  box-shadow: 0 0 30px rgba(255, 140, 0, 0.15);
+}
+.theme-retro .panel-block {
+  border-color: rgba(255, 165, 0, 0.2);
+  box-shadow: 0 0 10px rgba(255, 140, 0, 0.08);
+}
+.theme-retro .panel-title { color: #fbbf24; }
+.theme-retro .panel-value { color: #fef3c7; }
+.theme-retro .game-title { color: #f59e0b; text-shadow: 0 0 20px rgba(245, 158, 11, 0.5); }
+.theme-retro .player-bar-name { color: #fbbf24; }
+.theme-retro .tab-active { background: rgba(251, 191, 36, 0.15); border-color: #f59e0b; color: #fbbf24; }
+.theme-retro .theme-active { border-color: #f59e0b; color: #f59e0b; }
+.theme-retro .cell[data-type="1"] { background: #dc2626; box-shadow: inset 0 0 4px rgba(220, 38, 38, 0.5); }
+.theme-retro .cell[data-type="2"] { background: #f59e0b; box-shadow: inset 0 0 4px rgba(245, 158, 11, 0.5); }
+.theme-retro .cell[data-type="3"] { background: #7c3aed; box-shadow: inset 0 0 4px rgba(124, 58, 237, 0.5); }
+.theme-retro .cell[data-type="4"] { background: #16a34a; box-shadow: inset 0 0 4px rgba(22, 163, 74, 0.5); }
+.theme-retro .cell[data-type="5"] { background: #e11d48; box-shadow: inset 0 0 4px rgba(225, 29, 72, 0.5); }
+.theme-retro .cell[data-type="6"] { background: #2563eb; box-shadow: inset 0 0 4px rgba(37, 99, 235, 0.5); }
+.theme-retro .cell[data-type="7"] { background: #ea580c; box-shadow: inset 0 0 4px rgba(234, 88, 12, 0.5); }
+
+/* ============================================================================
+ * THEME: MONO (minimalist grayscale)
+ * ============================================================================ */
+.theme-mono .game-wrapper {
+  background: radial-gradient(ellipse at center, #1e1e1e 0%, #0a0a0a 70%, #000 100%);
+}
+.theme-mono .board-container {
+  border-color: rgba(160, 160, 160, 0.2);
+  box-shadow: 0 0 20px rgba(128, 128, 128, 0.1);
+}
+.theme-mono .panel-block {
+  border-color: rgba(160, 160, 160, 0.15);
+}
+.theme-mono .panel-title { color: #a0a0a0; }
+.theme-mono .panel-value { color: #e5e5e5; }
+.theme-mono .game-title { color: #d4d4d4; text-shadow: 0 0 15px rgba(212, 212, 212, 0.3); }
+.theme-mono .player-bar-name { color: #d4d4d4; }
+.theme-mono .tab-active { background: rgba(212, 212, 212, 0.1); border-color: #a0a0a0; color: #d4d4d4; }
+.theme-mono .theme-active { border-color: #d4d4d4; color: #d4d4d4; }
+.theme-mono .scanlines { display: none; }
+.theme-mono .cell[data-type="1"] { background: #e5e5e5; }
+.theme-mono .cell[data-type="2"] { background: #d4d4d4; }
+.theme-mono .cell[data-type="3"] { background: #a3a3a3; }
+.theme-mono .cell[data-type="4"] { background: #b0b0b0; }
+.theme-mono .cell[data-type="5"] { background: #8a8a8a; }
+.theme-mono .cell[data-type="6"] { background: #c0c0c0; }
+.theme-mono .cell[data-type="7"] { background: #999; }
+.theme-mono .cell[data-type]:not([data-type="0"]) { box-shadow: none; border: 1px solid rgba(60,60,60,0.5); }
+
+/* ============================================================================
+ * THEME: PASTEL (soft candy colors)
+ * ============================================================================ */
+.theme-pastel .game-wrapper {
+  background: radial-gradient(ellipse at center, #1e1b2e 0%, #12101c 70%, #0a0910 100%);
+}
+.theme-pastel .board-container {
+  border-color: rgba(196, 181, 253, 0.2);
+  box-shadow: 0 0 25px rgba(196, 181, 253, 0.1);
+}
+.theme-pastel .panel-block {
+  border-color: rgba(196, 181, 253, 0.15);
+}
+.theme-pastel .panel-title { color: #c4b5fd; }
+.theme-pastel .panel-value { color: #ede9fe; }
+.theme-pastel .game-title { color: #a78bfa; text-shadow: 0 0 20px rgba(167, 139, 250, 0.4); }
+.theme-pastel .player-bar-name { color: #c4b5fd; }
+.theme-pastel .tab-active { background: rgba(167, 139, 250, 0.1); border-color: #a78bfa; color: #c4b5fd; }
+.theme-pastel .theme-active { border-color: #a78bfa; color: #a78bfa; }
+.theme-pastel .cell[data-type="1"] { background: #93c5fd; box-shadow: inset 0 0 6px rgba(147, 197, 253, 0.4); }
+.theme-pastel .cell[data-type="2"] { background: #fde68a; box-shadow: inset 0 0 6px rgba(253, 230, 138, 0.4); }
+.theme-pastel .cell[data-type="3"] { background: #c4b5fd; box-shadow: inset 0 0 6px rgba(196, 181, 253, 0.4); }
+.theme-pastel .cell[data-type="4"] { background: #86efac; box-shadow: inset 0 0 6px rgba(134, 239, 172, 0.4); }
+.theme-pastel .cell[data-type="5"] { background: #fca5a5; box-shadow: inset 0 0 6px rgba(252, 165, 165, 0.4); }
+.theme-pastel .cell[data-type="6"] { background: #7dd3fc; box-shadow: inset 0 0 6px rgba(125, 211, 252, 0.4); }
+.theme-pastel .cell[data-type="7"] { background: #fdba74; box-shadow: inset 0 0 6px rgba(253, 186, 116, 0.4); }
