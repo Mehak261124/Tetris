@@ -53,6 +53,10 @@
 #define LEADERBOARD_MAX 10
 #define LEADERBOARD_FILE "leaderboard.txt"
 
+#define LOCK_DELAY_TICKS 10   /* ticks before auto-lock (10 × 50ms = 500ms) */
+#define MAX_LOCK_RESETS  15   /* max lock-timer resets per piece             */
+#define SRS_KICK_TESTS    5   /* wall-kick test positions per rotation       */
+
 /* Active piece coordinates are board-space cell indices, not pixels. */
 typedef struct {
   int type;
@@ -75,15 +79,26 @@ typedef struct {
   int board[ROWS][COLS];
   Piece current;
   Piece next;
+  Piece held;
   int has_current;
+  int has_held;
+  int hold_used;       /* 1 = already held this piece (resets on spawn)  */
   int score;
   int level;
   int lines;
+  int combo;           /* consecutive clears: resets on non-clearing lock */
   int game_over;
   int paused;
   int rand_state;
   char player_name[PLAYER_NAME_MAX];
   int high_score;
+  /* 7-bag randomizer */
+  int bag[NUM_PIECES];
+  int bag_index;
+  /* Lock delay */
+  int lock_ticks;
+  int lock_resets;
+  int last_was_rotate; /* for future T-spin detection */
 } Game;
 
 /* Global leaderboard (persisted to file) */
@@ -129,6 +144,25 @@ static const int PIECES[NUM_PIECES][NUM_ROTATIONS][PIECE_SIZE][PIECE_SIZE] = {
      {{1, 1, 0, 0}, {0, 1, 0, 0}, {0, 1, 0, 0}, {0, 0, 0, 0}}}};
 
 static const char PIECE_NAMES[NUM_PIECES] = {'I', 'O', 'T', 'S', 'Z', 'J', 'L'};
+
+/* =============================================================================
+ * SRS WALL KICK OFFSET TABLES  (y-down positive, applied to piece position)
+ * Index: [old_rotation][test 0..4] = {dx, dy}
+ * Clockwise transitions: 0→1, 1→2, 2→3, 3→0
+ * ============================================================================= */
+static const int SRS_JLSTZ[NUM_ROTATIONS][SRS_KICK_TESTS][2] = {
+  /* 0→1 */ {{ 0, 0}, {-1, 0}, {-1,-1}, { 0, 2}, {-1, 2}},
+  /* 1→2 */ {{ 0, 0}, { 1, 0}, { 1, 1}, { 0,-2}, { 1,-2}},
+  /* 2→3 */ {{ 0, 0}, { 1, 0}, { 1,-1}, { 0, 2}, { 1, 2}},
+  /* 3→0 */ {{ 0, 0}, {-1, 0}, {-1, 1}, { 0,-2}, {-1,-2}},
+};
+
+static const int SRS_I[NUM_ROTATIONS][SRS_KICK_TESTS][2] = {
+  /* 0→1 */ {{ 0, 0}, {-2, 0}, { 1, 0}, {-2, 1}, { 1,-2}},
+  /* 1→2 */ {{ 0, 0}, {-1, 0}, { 2, 0}, {-1,-2}, { 2, 1}},
+  /* 2→3 */ {{ 0, 0}, { 2, 0}, {-1, 0}, { 2,-1}, {-1, 2}},
+  /* 3→0 */ {{ 0, 0}, { 1, 0}, {-2, 0}, { 1, 2}, {-2,-1}},
+};
 
 /* Minimal write helpers using fputs/fprintf (allowed <stdio.h> only). */
 static void write_str(const char *s) {
@@ -299,20 +333,37 @@ static int leaderboard_high_score(void) {
 
 /* ---------------- Game logic ---------------- */
 
-/* LCG pseudo-random generator.
- * NOTE: raw * kept here because LCG relies on unsigned overflow.
- * t_mod() used for final range reduction. */
-static int rand_next(Game *g) {
+/* LCG pseudo-random generator (kept for bag shuffling). */
+static int rand_next_raw(Game *g) {
   g->rand_state = (g->rand_state * 1103515245 + 12345) & 0x7FFFFFFF;
-  return t_mod(g->rand_state, NUM_PIECES);
+  return g->rand_state;
 }
 
 static void seed_rand(Game *g) {
-  /* Use rand() from <stdlib.h> (allowed) to seed the LCG.
-   * No <sys/time.h> needed — keeps ws_tetris.c free of POSIX headers. */
   g->rand_state = rand();
   if (g->rand_state == 0)
     g->rand_state = 1;
+}
+
+/* ---- 7-Bag Randomizer ---- */
+static void bag_shuffle(Game *g) {
+  for (int i = 0; i < NUM_PIECES; i++)
+    g->bag[i] = i;
+  /* Fisher-Yates shuffle using LCG */
+  for (int i = NUM_PIECES - 1; i > 0; i--) {
+    int j = t_mod(rand_next_raw(g), i + 1);
+    if (j < 0) j = -j;
+    int tmp = g->bag[i];
+    g->bag[i] = g->bag[j];
+    g->bag[j] = tmp;
+  }
+  g->bag_index = 0;
+}
+
+static int bag_next(Game *g) {
+  if (g->bag_index >= NUM_PIECES)
+    bag_shuffle(g);
+  return g->bag[g->bag_index++];
 }
 
 static void clear_board(Game *g) {
@@ -328,12 +379,19 @@ static void game_reset(Game *g) {
   g->score = 0;
   g->level = 1;
   g->lines = 0;
+  g->combo = 0;
   g->paused = 0;
   g->game_over = 0;
   g->has_current = 0;
+  g->has_held = 0;
+  g->hold_used = 0;
+  g->lock_ticks = 0;
+  g->lock_resets = 0;
+  g->last_was_rotate = 0;
   g->high_score = leaderboard_high_score();
   seed_rand(g);
-  g->next.type = rand_next(g);
+  bag_shuffle(g);
+  g->next.type = bag_next(g);
   g->next.rotation = 0;
   g->next.x = 3;
   g->next.y = 0;
@@ -363,15 +421,18 @@ static void spawn_piece(Game *g) {
   g->current.x = 3;
   g->current.y = 0;
   g->has_current = 1;
+  g->hold_used = 0;   /* allow hold again for new piece */
+  g->lock_ticks = 0;
+  g->lock_resets = 0;
+  g->last_was_rotate = 0;
 
-  g->next.type = rand_next(g);
+  g->next.type = bag_next(g);
   g->next.rotation = 0;
   g->next.x = 3;
   g->next.y = 0;
 
   if (collides(g, &g->current, 0, 0, g->current.rotation)) {
     g->game_over = 1;
-    /* Insert into leaderboard on game over */
     if (g->score > 0) {
       leaderboard_insert(g->player_name, g->score, g->level, g->lines);
       g->high_score = leaderboard_high_score();
@@ -428,15 +489,26 @@ static void clear_lines(Game *g) {
                : (cleared == 2) ? 300
                : (cleared == 3) ? 500
                                 : 800;
-    g->score += t_mul(base, g->level);
+    /* Combo bonus: 50 * combo * level for consecutive clears */
+    int combo_bonus = t_mul(t_mul(50, g->combo), g->level);
+    g->score += t_mul(base, g->level) + combo_bonus;
+    g->combo++;  /* increment for next clear */
+
+
     g->level = 1 + t_div(g->lines, 10);
+    /* Cap at level 20 */
+    if (g->level > 20) g->level = 20;
 
     if (g->score > g->high_score) {
       g->high_score = g->score;
     }
+  } else {
+    g->combo = 0; /* reset combo on non-clearing lock */
   }
 }
 
+/* step_down: gravity pull — moves piece down but does NOT lock.
+ * Lock delay is handled in the main loop. */
 static void step_down(Game *g) {
   if (!g->has_current)
     spawn_piece(g);
@@ -444,20 +516,24 @@ static void step_down(Game *g) {
     return;
   if (!collides(g, &g->current, 1, 0, g->current.rotation)) {
     g->current.y += 1;
-  } else {
-    int overflow = lock_piece(g);
-    if (overflow) {
-      g->game_over = 1;
-      /* Insert into leaderboard on game over */
-      if (g->score > 0) {
-        leaderboard_insert(g->player_name, g->score, g->level, g->lines);
-        g->high_score = leaderboard_high_score();
-      }
-      return;
-    }
-    clear_lines(g);
-    spawn_piece(g);
+    g->lock_ticks = 0; /* moved down, reset lock timer */
   }
+  /* If piece is on ground, the main loop lock-delay handles locking. */
+}
+
+/* Force-lock the current piece, clear lines, spawn next. */
+static void do_lock(Game *g) {
+  int overflow = lock_piece(g);
+  if (overflow) {
+    g->game_over = 1;
+    if (g->score > 0) {
+      leaderboard_insert(g->player_name, g->score, g->level, g->lines);
+      g->high_score = leaderboard_high_score();
+    }
+    return;
+  }
+  clear_lines(g);
+  spawn_piece(g);
 }
 
 static int ghost_y(Game *g) {
@@ -554,7 +630,6 @@ static void handle_action(Game *g, const char *action, const char *raw_msg) {
     return;
   }
   if (t_strcmp(action, "restart") == 0) {
-    /* Save score to leaderboard before reset */
     if (g->game_over && g->score > 0) {
       /* Already saved on game_over trigger, skip duplicate */
     }
@@ -564,44 +639,107 @@ static void handle_action(Game *g, const char *action, const char *raw_msg) {
   if (g->game_over || g->paused)
     return;
 
+  /* ---- Hold Piece ---- */
+  if (t_strcmp(action, "hold") == 0) {
+    if (g->hold_used) return; /* can only hold once per piece */
+    g->hold_used = 1;
+    g->last_was_rotate = 0;
+    if (g->has_held) {
+      /* Swap current with held */
+      Piece tmp = g->held;
+      g->held = g->current;
+      g->held.rotation = 0;
+      g->current = tmp;
+      g->current.rotation = 0;
+      g->current.x = 3;
+      g->current.y = 0;
+      g->lock_ticks = 0;
+      g->lock_resets = 0;
+      if (collides(g, &g->current, 0, 0, g->current.rotation)) {
+        g->game_over = 1;
+        if (g->score > 0) {
+          leaderboard_insert(g->player_name, g->score, g->level, g->lines);
+          g->high_score = leaderboard_high_score();
+        }
+      }
+    } else {
+      /* First hold: stash current, spawn from next */
+      g->held = g->current;
+      g->held.rotation = 0;
+      g->has_held = 1;
+      g->has_current = 0;
+      spawn_piece(g);
+      g->hold_used = 1; /* spawn_piece resets hold_used, re-set it */
+    }
+    return;
+  }
+
+  /* ---- Movement (with lock-delay reset) ---- */
+  int moved = 0;
   if (t_strcmp(action, "move_left") == 0) {
-    if (!collides(g, &g->current, 0, -1, g->current.rotation))
+    if (!collides(g, &g->current, 0, -1, g->current.rotation)) {
       g->current.x -= 1;
+      moved = 1;
+    }
+    g->last_was_rotate = 0;
   } else if (t_strcmp(action, "move_right") == 0) {
-    if (!collides(g, &g->current, 0, 1, g->current.rotation))
+    if (!collides(g, &g->current, 0, 1, g->current.rotation)) {
       g->current.x += 1;
+      moved = 1;
+    }
+    g->last_was_rotate = 0;
   } else if (t_strcmp(action, "rotate") == 0) {
-    int nr = t_mod(g->current.rotation + 1, NUM_ROTATIONS);
-    if (!collides(g, &g->current, 0, 0, nr))
-      g->current.rotation = nr;
+    /* ---- SRS Wall Kick Rotation ---- */
+    int old_rot = g->current.rotation;
+    int new_rot = t_mod(old_rot + 1, NUM_ROTATIONS);
+    const int (*kicks)[2];
+    if (g->current.type == 0) /* I piece */
+      kicks = SRS_I[old_rot];
+    else if (g->current.type == 1) /* O piece — no kick needed */
+      kicks = SRS_JLSTZ[old_rot];
+    else
+      kicks = SRS_JLSTZ[old_rot];
+
+    for (int t = 0; t < SRS_KICK_TESTS; t++) {
+      int dx = kicks[t][0];
+      int dy = kicks[t][1];
+      if (!collides(g, &g->current, dy, dx, new_rot)) {
+        g->current.x += dx;
+        g->current.y += dy;
+        g->current.rotation = new_rot;
+        moved = 1;
+        g->last_was_rotate = 1;
+        break;
+      }
+    }
   } else if (t_strcmp(action, "soft_drop") == 0) {
-    int old_y = g->current.y;
-    int old_type = g->current.type;
-    int old_has = g->has_current;
-    step_down(g);
-    if (g->has_current && old_has && g->current.type == old_type &&
-        g->current.y > old_y) {
+    g->last_was_rotate = 0;
+    if (!collides(g, &g->current, 1, 0, g->current.rotation)) {
+      g->current.y += 1;
       g->score += 1;
+      g->lock_ticks = 0;
     }
   } else if (t_strcmp(action, "hard_drop") == 0) {
-    int moved = 0;
+    g->last_was_rotate = 0;
+    int drop_rows = 0;
     while (!collides(g, &g->current, 1, 0, g->current.rotation)) {
       g->current.y += 1;
-      moved++;
+      drop_rows++;
     }
-    if (moved > 0)
-      g->score += t_mul(moved, 2);
-    int overflow = lock_piece(g);
-    if (overflow) {
-      g->game_over = 1;
-      if (g->score > 0) {
-        leaderboard_insert(g->player_name, g->score, g->level, g->lines);
-        g->high_score = leaderboard_high_score();
-      }
-      return;
+    if (drop_rows > 0)
+      g->score += t_mul(drop_rows, 2);
+    /* Hard drop locks immediately (bypasses lock delay) */
+    do_lock(g);
+    return;
+  }
+
+  /* Reset lock delay on successful move/rotate while on ground */
+  if (moved && g->has_current &&
+      collides(g, &g->current, 1, 0, g->current.rotation)) {
+    if (g->lock_resets < MAX_LOCK_RESETS) {
+      g->lock_ticks = 0;
+      g->lock_resets++;
     }
-    clear_lines(g);
-    spawn_piece(g);
   }
 }
 
@@ -714,12 +852,30 @@ static void build_state_json(Game *g, char *out, int out_sz) {
   append_char(out, &len, '"');
   append_char(out, &len, '}');
 
+  /* Held piece */
+  append_str(out, &len, ",\"heldPiece\":");
+  if (g->has_held) {
+    append_char(out, &len, '{');
+    append_str(out, &len, "\"shape\":");
+    append_shape(out, &len, g->held.type, 0);
+    append_str(out, &len, ",\"type\":\"");
+    append_char(out, &len, PIECE_NAMES[g->held.type]);
+    append_char(out, &len, '"');
+    append_char(out, &len, '}');
+  } else {
+    append_str(out, &len, "null");
+  }
+  append_str(out, &len, ",\"holdUsed\":");
+  append_str(out, &len, g->hold_used ? "true" : "false");
+
   append_str(out, &len, ",\"score\":");
   append_int(out, &len, g->score);
   append_str(out, &len, ",\"level\":");
   append_int(out, &len, g->level);
   append_str(out, &len, ",\"lines\":");
   append_int(out, &len, g->lines);
+  append_str(out, &len, ",\"combo\":");
+  append_int(out, &len, g->combo);
   append_str(out, &len, ",\"highScore\":");
   append_int(out, &len, g->high_score);
 
@@ -775,106 +931,139 @@ int main(void) {
   leaderboard_load();
 
   /* ---- Start server via screen.c (hardware abstraction) --------------- *
-   * screen_server_start() wraps socket/bind/listen/accept — all raw
-   * networking lives inside the custom library, not in game logic.      */
+   * screen_server_listen() binds + listens.  We keep the server socket
+   * open so we can re-accept clients on page refresh / disconnect.      */
   write_stdout("Tetris WS backend listening on ws://localhost:");
   write_int(PORT_DEFAULT);
   write_stdout("\n");
 
-  int client_fd = screen_server_start(PORT_DEFAULT);
-  if (client_fd < 0) {
-    write_str("Error: server start failed\n");
+  int server_fd = screen_server_listen(PORT_DEFAULT);
+  if (server_fd < 0) {
+    write_str("Error: server listen failed\n");
     memory_cleanup();
     return 1;
   }
 
-  /* ---- Initialize I/O devices via custom libraries -------------------- *
-   * screen.c  = "display driver" for the browser client
-   * keyboard.c = "keyboard driver" for the browser client               */
-  screen_init_ws(client_fd);
-  keyboard_init_ws(client_fd);
-
-  /* Perform WebSocket handshake via screen.c (display initialization). */
-  if (screen_ws_handshake() < 0) {
-    write_str("WebSocket handshake failed\n");
-    keyboard_close_ws();
-    memory_cleanup();
-    return 1;
-  }
-
-  /* ---- Allocate game state dynamically via memory.c (t_alloc) --------- *
-   * This satisfies the "Dynamic Memory" requirement: at least one
-   * runtime t_alloc() and matching t_dealloc(). */
+  /* ---- Allocate game state dynamically via memory.c (t_alloc) --------- */
   Game *game = (Game *)t_alloc(sizeof(Game));
   if (!game) {
     write_str("Error: t_alloc failed for Game\n");
-    keyboard_close_ws();
+    screen_server_close(server_fd);
     memory_cleanup();
     return 1;
   }
 
-  /* Initialize player name to default */
-  t_strncpy(game->player_name, "Player", PLAYER_NAME_MAX);
-
-  game_reset(game);
-  spawn_piece(game);
-
   char msg[2048];
-  char json[16384]; /* larger buffer for leaderboard data */
+  char json[16384];
 
-  int tick_ms = 50;
-  int drop_ticks = 12;
-  int tick_counter = 0;
-
-  /* Send initial state immediately so UI has data */
-  build_state_json(game, json, sizeof(json));
-  screen_send_ws(json);
-
+  /* ======== Outer loop: accept clients, reconnect on disconnect ======== */
   while (1) {
-    /* Poll for input via keyboard.c (wraps select). */
-    int ready = keyboard_poll_ws(tick_ms);
-    if (ready < 0)
-      break;
+    write_stdout("Waiting for client...\n");
 
-    int dirty = 0;
-    if (ready > 0) {
-      /* Read input via keyboard.c (our WebSocket "keyboard driver"). */
-      int got = keyboard_recv_ws(msg, sizeof(msg));
-      if (got < 0)
-        break;
-      if (got > 0) {
-        char action[64];
-        if (parse_action(msg, action, sizeof(action))) {
-          handle_action(game, action, msg);
-          dirty = 1;
+    int client_fd = screen_server_accept(server_fd);
+    if (client_fd < 0) {
+      write_str("Error: accept failed\n");
+      break;
+    }
+
+    write_stdout("Client connected. Performing handshake...\n");
+
+    /* Initialize I/O devices for this client */
+    screen_init_ws(client_fd);
+    keyboard_init_ws(client_fd);
+
+    /* WebSocket handshake */
+    if (screen_ws_handshake() < 0) {
+      write_str("WebSocket handshake failed, waiting for next client\n");
+      keyboard_close_ws();
+      continue; /* retry with next client */
+    }
+
+    write_stdout("Handshake OK. Starting game session.\n");
+
+    /* Initialize game state for this session */
+    t_strncpy(game->player_name, "Player", PLAYER_NAME_MAX);
+    game_reset(game);
+    spawn_piece(game);
+
+    int tick_ms = 50;
+    int drop_ticks = 12;
+    int tick_counter = 0;
+
+    /* Send initial state immediately so UI has data */
+    build_state_json(game, json, sizeof(json));
+    screen_send_ws(json);
+
+    /* ======== Inner loop: game tick loop for this client ======== */
+    while (1) {
+      int ready = keyboard_poll_ws(tick_ms);
+      if (ready < 0)
+        break; /* client disconnected */
+
+      int dirty = 0;
+      if (ready > 0) {
+        int got = keyboard_recv_ws(msg, sizeof(msg));
+        if (got < 0)
+          break; /* client disconnected */
+        if (got > 0) {
+          char action[64];
+          if (parse_action(msg, action, sizeof(action))) {
+            handle_action(game, action, msg);
+            dirty = 1;
+          }
         }
       }
-    }
 
-    if (!game->paused && !game->game_over) {
-      tick_counter++;
-      int level = game->level;
-      if (level < 1)
-        level = 1;
-      drop_ticks = t_max(14 - level, 2);
-      if (tick_counter >= drop_ticks) {
-        tick_counter = 0;
-        step_down(game);
-        dirty = 1;
+      if (!game->paused && !game->game_over) {
+        tick_counter++;
+        int level = game->level;
+        if (level < 1)
+          level = 1;
+        /* NES-style speed curve: faster drops at higher levels
+         * Level 1: 12 ticks (600ms), Level 5: 8 ticks (400ms),
+         * Level 10: 3 ticks (150ms), Level 15+: 1 tick (50ms) */
+        if (level <= 8)
+          drop_ticks = t_max(13 - level, 5);
+        else if (level <= 13)
+          drop_ticks = t_max(8 - t_div(level - 8, 2), 2);
+        else
+          drop_ticks = 1;
+        if (tick_counter >= drop_ticks) {
+          tick_counter = 0;
+          step_down(game);
+          dirty = 1;
+        }
+
+        /* ---- Lock Delay ---- */
+        if (game->has_current &&
+            collides(game, &game->current, 1, 0, game->current.rotation)) {
+          game->lock_ticks++;
+          if (game->lock_ticks >= LOCK_DELAY_TICKS) {
+            do_lock(game);
+            dirty = 1;
+          }
+        } else if (game->has_current) {
+          game->lock_ticks = 0;
+        }
+      }
+
+      if (dirty) {
+        build_state_json(game, json, sizeof(json));
+        if (screen_send_ws(json) < 0)
+          break; /* client disconnected */
       }
     }
 
-    if (dirty) {
-      /* Render output via screen.c (our WebSocket "display driver"). */
-      build_state_json(game, json, sizeof(json));
-      if (screen_send_ws(json) < 0)
-        break;
-    }
+    /* ---- Client disconnected: cleanup I/O, loop back to accept ---- */
+    write_stdout("Client disconnected. Ready for reconnect.\n");
+    keyboard_close_ws();
+    /* Reload leaderboard in case it was updated */
+    leaderboard_load();
   }
 
-  /* ---- Cleanup: free dynamic memory and release devices --------------- */
+  /* ---- Final cleanup ---- */
   t_dealloc(game);
-  keyboard_close_ws();
+  screen_server_close(server_fd);
   memory_cleanup();
   return 0;
 }
