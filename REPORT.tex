@@ -8,6 +8,17 @@
 \usepackage{booktabs}
 \usepackage{hyperref}
 \usepackage{array}
+\usepackage{float}
+\usepackage{caption}
+
+% ---------- Listing caption fix ----------
+\captionsetup[lstlisting]{
+  position=top,
+  skip=8pt,
+  font=small,
+  labelfont=bf
+}
+\renewcommand{\lstlistingname}{Listing}
 
 \lstset{
   basicstyle=\ttfamily\footnotesize,
@@ -17,6 +28,13 @@
   keywordstyle=\color{blue},
   commentstyle=\color{green!50!black},
   stringstyle=\color{red!60!black},
+  aboveskip=1.5em,
+  belowskip=1.5em,
+  captionpos=t,
+  xleftmargin=0.5em,
+  xrightmargin=0.5em,
+  framexleftmargin=0.5em,
+  framexrightmargin=0.5em,
 }
 
 \title{Tetris OS Simulator: A Custom Operating System\\Module Demonstration Using Game Engine Architecture}
@@ -62,11 +80,11 @@ The project covers the complete lifecycle of an OS-like system: boot (memory ini
 
 The system follows a layered architecture where each custom library represents an OS module:
 
-\begin{lstlisting}[language=C,caption={System Architecture Layers}]
-Application Layer:  ws_tetris.c / main.c
-Core Library Layer: string.c | math.c | memory.c
-HAL Layer:          screen.c | keyboard.c | sound.c
-Host OS / Hardware: POSIX sockets | Terminal | Audio
+\begin{lstlisting}[caption={System Architecture Layers}]
+Application Layer  : ws_tetris.c / main.c
+Core Library Layer : string.c | math.c | memory.c
+HAL Layer          : screen.c | keyboard.c | sound.c
+Host OS/Hardware   : POSIX sockets | Terminal | Audio
 \end{lstlisting}
 
 \textbf{Design Principle:} Game logic never includes networking headers, POSIX headers, or standard library functions beyond \texttt{<stdio.h>} and \texttt{<stdlib.h>}. All I/O flows through the Hardware Abstraction Layer (HAL).
@@ -78,7 +96,7 @@ Host OS / Hardware: POSIX sockets | Terminal | Audio
 \subsection{Module 1: Process Management}
 Process management determines \textit{who gets to run, when, and where}. The game loop acts as a cooperative scheduler executing three processes each tick:
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \caption{Process Schedule}
 \begin{tabular}{lll}
@@ -142,7 +160,7 @@ The file system provides \textit{persistent storage} for scores and leaderboard 
 \subsection{Module 4: I/O Management}
 I/O management defines \textit{how this computer talks to the world} --- screen, keyboard, and speaker.
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \caption{I/O Device Mapping}
 \begin{tabular}{lll}
@@ -162,7 +180,7 @@ Speaker & WAV + \texttt{afplay} & Web Audio API \\
 \subsection{Module 5: Error Handling \& Security}
 Error handling ensures \textit{graceful behaviour when things go wrong}.
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \caption{Error Handling Matrix}
 \begin{tabular}{ll}
@@ -210,6 +228,7 @@ The user interface defines \textit{how a user interacts with the game}.
 \section{Implementation Details}
 
 \subsection{Custom Library Pipeline}
+
 \begin{lstlisting}[caption={Data Flow Pipeline}]
 Input    -> keyboard.c  (captures raw input)
 Parsing  -> string.c    (t_strcmp, t_itoa, t_strlen)
@@ -221,7 +240,7 @@ Audio    -> sound.c     (WAV generation / Web Audio)
 
 \subsection{Gameplay Mechanics}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \caption{Gameplay Feature Matrix}
 \begin{tabular}{lcc}
@@ -252,7 +271,7 @@ Touch Controls & $-$ & \checkmark \\
 
 \subsection{Technology Stack}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \caption{Technology Components}
 \begin{tabular}{ll}
@@ -277,7 +296,7 @@ Both build targets compile with zero warnings under strict flags: \texttt{gcc -W
 
 \subsection{Edge Cases Verified}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \caption{Test Results}
 \begin{tabular}{lcc}
