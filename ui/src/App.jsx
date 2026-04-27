@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 
 /* =============================================================================
  * CONSTANTS
@@ -20,17 +20,14 @@ const REPEATABLE_ACTIONS = new Set(["move_left", "move_right", "soft_drop"]);
 
 /* Theme definitions — CSS custom property overrides */
 const THEMES = {
-  neon: { label: "Neon", className: "" },
-  retro: { label: "Retro", className: "theme-retro" },
-  mono:  { label: "Mono", className: "theme-mono" },
-  pastel:{ label: "Pastel", className: "theme-pastel" },
+  neon:   { label: "Neon",   className: "" },
+  retro:  { label: "Retro",  className: "theme-retro" },
+  mono:   { label: "Mono",   className: "theme-mono" },
+  pastel: { label: "Pastel", className: "theme-pastel" },
 };
 
 /* =============================================================================
  * WEB AUDIO — Sound Effects matching terminal sound.c
- * =============================================================================
- * All sounds are generated via the Web Audio API oscillators.  No audio files
- * are needed.  This mirrors the square-wave approach used in sound.c.
  * ============================================================================= */
 
 let audioCtx = null;
@@ -87,7 +84,6 @@ const SFX = {
  * BACKGROUND MUSIC — Korobeiniki melody via Web Audio oscillators
  * ============================================================================= */
 const MELODY = [
-  /* [freq, duration_ms] — simplified Korobeiniki (Type A) */
   [659,400],[494,200],[523,200],[587,400],[523,200],[494,200],
   [440,400],[440,200],[523,200],[659,400],[587,200],[523,200],
   [494,400],[494,200],[523,200],[587,400],[659,400],
@@ -241,10 +237,10 @@ const reducer = (state, action) => {
 const actionForKey = (event) => {
   const code = event.code;
   const key = event.key;
-  if (code === "ArrowLeft" || key === "ArrowLeft" || key === "Left") return "move_left";
+  if (code === "ArrowLeft"  || key === "ArrowLeft"  || key === "Left")  return "move_left";
   if (code === "ArrowRight" || key === "ArrowRight" || key === "Right") return "move_right";
-  if (code === "ArrowUp" || key === "ArrowUp" || key === "Up") return "rotate";
-  if (code === "ArrowDown" || key === "ArrowDown" || key === "Down") return "soft_drop";
+  if (code === "ArrowUp"    || key === "ArrowUp"    || key === "Up")    return "rotate";
+  if (code === "ArrowDown"  || key === "ArrowDown"  || key === "Down")  return "soft_drop";
   if (code === "Space" || key === " " || key === "Spacebar") return "hard_drop";
   if (code === "KeyP" || key === "p" || key === "P") return "pause";
   if (code === "KeyR" || key === "r" || key === "R") return "restart";
@@ -260,55 +256,74 @@ const actionForKey = (event) => {
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
-  const wsRef = useRef(null);
-  const reconnectTimer = useRef(null);
-  const [scoreFlash, setScoreFlash] = useState(false);
-  const [lineFlash, setLineFlash] = useState(false);
-  const [boardShake, setBoardShake] = useState(false);
-  const prevLines = useRef(state.lines);
-  const prevScore = useRef(state.score);
-  const prevGameState = useRef(state.gameState);
-  const [showStartScreen, setShowStartScreen] = useState(true);
-  const [nameInput, setNameInput] = useState("");
-  const [soundEnabled, setSoundEnabled] = useState(true);
-  const [musicEnabled, setMusicEnabled] = useState(false);
-  const [activeTab, setActiveTab] = useState("controls");
-  const [theme, setTheme] = useState("neon");
-  const [levelUpFlash, setLevelUpFlash] = useState(false);
-  const nameInputRef = useRef(null);
-  const prevLevel = useRef(state.level);
+  const wsRef            = useRef(null);
+  const reconnectTimer   = useRef(null);
 
+  /* --- animation state --- */
+  const [scoreFlash,   setScoreFlash]   = useState(false);
+  const [lineFlash,    setLineFlash]    = useState(false);
+  const [boardShake,   setBoardShake]   = useState(false);
+  const [levelUpFlash, setLevelUpFlash] = useState(false);
+
+  /* --- prev-value trackers --- */
+  const prevLines     = useRef(state.lines);
+  const prevScore     = useRef(state.score);
+  const prevGameState = useRef(state.gameState);
+  const prevLevel     = useRef(state.level);
+
+  /* --- UI state --- */
+  const [showStartScreen, setShowStartScreen] = useState(true);
+  const [nameInput,       setNameInput]       = useState("");
+  const [soundEnabled,    setSoundEnabled]    = useState(true);
+  const [musicEnabled,    setMusicEnabled]    = useState(false);
+  const [activeTab,       setActiveTab]       = useState("controls");
+  const [theme,           setTheme]           = useState("neon");
+
+  /* --- refs --- */
+  const nameInputRef = useRef(null);
+  const dasRef       = useRef({ key: null, dasTimer: null, arrTimer: null });
+
+  /* ── KEY FIX: measure left-column header height and apply to spacer ──────── */
+  const headerRef = useRef(null);   /* wraps game-title + player-bar          */
+  const spacerRef = useRef(null);   /* the invisible spacer in side-panel     */
+
+  useLayoutEffect(() => {
+    const sync = () => {
+      if (headerRef.current && spacerRef.current) {
+        const h = headerRef.current.getBoundingClientRect().height;
+        spacerRef.current.style.height = `${h}px`;
+      }
+    };
+    sync();
+    window.addEventListener("resize", sync);
+    return () => window.removeEventListener("resize", sync);
+  }, [showStartScreen]); /* re-run when start screen hides so refs are mounted */
+
+  /* ── grid ── */
   const grid = useMemo(
     () => buildRenderGrid(state.board, state.currentPiece, state.ghostPiece),
     [state.board, state.currentPiece, state.ghostPiece]
   );
 
-  /* ---- Sound trigger effects ---- */
+  /* ── sound effects ── */
   useEffect(() => {
     if (!soundEnabled || showStartScreen) return;
-    if (state.score > prevScore.current && state.lines === prevLines.current) {
-      // Score changed without line clear = probably a drop
-    }
     prevScore.current = state.score;
   }, [state.score, state.lines, soundEnabled, showStartScreen]);
 
   useEffect(() => {
     if (!soundEnabled || showStartScreen) return;
-    if (state.lines > prevLines.current) {
-      SFX.clear();
-    }
+    if (state.lines > prevLines.current) SFX.clear();
     prevLines.current = state.lines;
   }, [state.lines, soundEnabled, showStartScreen]);
 
   useEffect(() => {
     if (!soundEnabled || showStartScreen) return;
-    if (state.gameState === "gameover" && prevGameState.current !== "gameover") {
-      SFX.gameover();
-    }
+    if (state.gameState === "gameover" && prevGameState.current !== "gameover") SFX.gameover();
     prevGameState.current = state.gameState;
   }, [state.gameState, soundEnabled, showStartScreen]);
 
-  /* ---- Level-up effect ---- */
+  /* ── level-up ── */
   useEffect(() => {
     if (state.level > prevLevel.current && prevLevel.current > 0) {
       if (soundEnabled) SFX.levelUp();
@@ -319,7 +334,7 @@ export default function App() {
     prevLevel.current = state.level;
   }, [state.level, soundEnabled]);
 
-  /* ---- Background music lifecycle ---- */
+  /* ── background music ── */
   useEffect(() => {
     if (musicEnabled && !showStartScreen && state.gameState === "playing") {
       bgm.start();
@@ -329,7 +344,7 @@ export default function App() {
     return () => bgm.stop();
   }, [musicEnabled, showStartScreen, state.gameState]);
 
-  /* ---- Score flash ---- */
+  /* ── score flash ── */
   useEffect(() => {
     if (!Number.isFinite(state.score)) return;
     setScoreFlash(true);
@@ -337,7 +352,7 @@ export default function App() {
     return () => clearTimeout(t);
   }, [state.score]);
 
-  /* ---- Line clear flash + screen shake ---- */
+  /* ── line-clear flash + shake ── */
   useEffect(() => {
     if (!Number.isFinite(state.lines)) return;
     setLineFlash(true);
@@ -350,7 +365,7 @@ export default function App() {
     return () => clearTimeout(t);
   }, [state.lines]);
 
-  /* ---- WebSocket connection ---- */
+  /* ── WebSocket ── */
   useEffect(() => {
     let active = true;
     const connect = () => {
@@ -358,12 +373,11 @@ export default function App() {
       dispatch({ type: "WS_STATUS", status: "connecting" });
       const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
-      ws.onopen = () => dispatch({ type: "WS_STATUS", status: "open" });
+      ws.onopen    = () => dispatch({ type: "WS_STATUS", status: "open" });
       ws.onmessage = (event) => {
         try {
-          const payload = JSON.parse(event.data);
-          dispatch({ type: "UPDATE_STATE", payload });
-        } catch (err) {
+          dispatch({ type: "UPDATE_STATE", payload: JSON.parse(event.data) });
+        } catch {
           dispatch({ type: "WS_STATUS", status: "error" });
         }
       };
@@ -382,25 +396,23 @@ export default function App() {
     };
   }, []);
 
+  /* ── sendAction ── */
   const sendAction = useCallback((action, extra = {}) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ action, ...extra }));
-    // Play sound effects
     if (soundEnabled) {
       if (action === "move_left" || action === "move_right") SFX.move();
-      else if (action === "rotate") SFX.rotate();
+      else if (action === "rotate")    SFX.rotate();
       else if (action === "hard_drop") SFX.drop();
-      else if (action === "hold") SFX.hold();
+      else if (action === "hold")      SFX.hold();
     }
   }, [soundEnabled]);
 
-  /* ---- DAS / ARR — Delayed Auto Shift + Auto Repeat Rate ---- */
-  const dasRef = useRef({ key: null, dasTimer: null, arrTimer: null });
-
+  /* ── DAS / ARR ── */
   const clearDAS = useCallback(() => {
     const d = dasRef.current;
-    if (d.dasTimer) { clearTimeout(d.dasTimer); d.dasTimer = null; }
+    if (d.dasTimer) { clearTimeout(d.dasTimer);  d.dasTimer = null; }
     if (d.arrTimer) { clearInterval(d.arrTimer); d.arrTimer = null; }
     d.key = null;
   }, []);
@@ -410,81 +422,67 @@ export default function App() {
     const d = dasRef.current;
     d.key = action;
     d.dasTimer = setTimeout(() => {
-      d.arrTimer = setInterval(() => {
-        sendAction(action);
-      }, ARR_RATE);
+      d.arrTimer = setInterval(() => sendAction(action), ARR_RATE);
     }, DAS_DELAY);
   }, [sendAction, clearDAS]);
 
-  const handleKeyDown = useCallback(
-    (event) => {
-      if (showStartScreen) return;
-      const action = actionForKey(event);
-      if (!action) return;
-      if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space"].includes(event.code)) {
-        event.preventDefault();
-      }
-      /* DAS: only fire once on initial press for repeatable actions */
-      if (REPEATABLE_ACTIONS.has(action)) {
-        if (dasRef.current.key === action) return; /* already repeating */
-        sendAction(action);
-        startDAS(action);
-      } else {
-        sendAction(action);
-      }
-    },
-    [sendAction, showStartScreen, startDAS]
-  );
+  const handleKeyDown = useCallback((event) => {
+    if (showStartScreen) return;
+    const action = actionForKey(event);
+    if (!action) return;
+    if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Space"].includes(event.code)) {
+      event.preventDefault();
+    }
+    if (REPEATABLE_ACTIONS.has(action)) {
+      if (dasRef.current.key === action) return;
+      sendAction(action);
+      startDAS(action);
+    } else {
+      sendAction(action);
+    }
+  }, [sendAction, showStartScreen, startDAS]);
 
-  const handleKeyUp = useCallback(
-    (event) => {
-      const action = actionForKey(event);
-      if (action && dasRef.current.key === action) {
-        clearDAS();
-      }
-    },
-    [clearDAS]
-  );
+  const handleKeyUp = useCallback((event) => {
+    const action = actionForKey(event);
+    if (action && dasRef.current.key === action) clearDAS();
+  }, [clearDAS]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("keyup",   handleKeyUp);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("keyup",   handleKeyUp);
       clearDAS();
     };
   }, [handleKeyDown, handleKeyUp, clearDAS]);
 
-  /* ---- Focus name input on start screen ---- */
+  /* ── focus name input ── */
   useEffect(() => {
-    if (showStartScreen && nameInputRef.current) {
-      nameInputRef.current.focus();
-    }
+    if (showStartScreen && nameInputRef.current) nameInputRef.current.focus();
   }, [showStartScreen]);
 
-  /* ---- Start screen submit ---- */
+  /* ── start game ── */
   const handleStartGame = useCallback(() => {
     const name = nameInput.trim() || "Player";
     dispatch({ type: "SET_NAME", name });
     sendAction("set_name", { name });
     setShowStartScreen(false);
-    // Resume audio context on user gesture
     try { getAudioCtx().resume(); } catch (e) { /* ok */ }
   }, [nameInput, sendAction]);
 
-  /* ---- Derived state ---- */
-  const showOverlay = state.gameState === "gameover";
-  const showPaused = state.gameState === "paused";
+  /* ── derived ── */
+  const showOverlay    = state.gameState === "gameover";
+  const showPaused     = state.gameState === "paused";
   const isNewHighScore = state.score > 0 && state.score >= state.highScore;
   const wsMessage =
-    state.wsStatus === "reconnecting" ? "Reconnecting..." :
-    state.wsStatus === "connecting" ? "Connecting..." :
-    state.wsStatus === "error" ? "Connection error" : "";
+    state.wsStatus === "reconnecting" ? "Reconnecting..."  :
+    state.wsStatus === "connecting"   ? "Connecting..."    :
+    state.wsStatus === "error"        ? "Connection error" : "";
 
   const boardClasses = [
     "board-shell", "crt",
-    lineFlash ? "lines-flash" : "",
+    lineFlash  ? "lines-flash" : "",
     boardShake ? "board-shake" : "",
   ].filter(Boolean).join(" ");
 
@@ -510,15 +508,9 @@ export default function App() {
               placeholder="Player"
               value={nameInput}
               onChange={(e) => setNameInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleStartGame();
-              }}
+              onKeyDown={(e) => { if (e.key === "Enter") handleStartGame(); }}
             />
-            <button
-              id="start-button"
-              className="start-btn"
-              onClick={handleStartGame}
-            >
+            <button id="start-button" className="start-btn" onClick={handleStartGame}>
               START GAME
             </button>
           </div>
@@ -546,25 +538,31 @@ export default function App() {
 
   /* ====================== MAIN GAME ====================== */
   const themeClass = THEMES[theme]?.className || "";
+
   return (
     <div className={`game-wrapper ${themeClass}`}>
       <div className="game-layout">
-        {/* -- Left: Game Board -- */}
+
+        {/* ── Left: Game Board ── */}
         <div className="game-column">
-          <div className="game-title">TETRIS</div>
-          {/* Player bar */}
-          <div className="player-bar">
-            <span className="player-bar-label">Player:</span>{" "}
-            <span className="player-bar-name">{state.playerName || "Player"}</span>
+
+          {/* Header wrapper — measured by headerRef */}
+          <div ref={headerRef} className="game-column-header">
+            <div className="game-title">TETRIS</div>
+            <div className="player-bar">
+              <span className="player-bar-label">Player:</span>{" "}
+              <span className="player-bar-name">{state.playerName || "Player"}</span>
+            </div>
           </div>
+
           <div className={boardClasses}>
             <div className="scanlines" />
             <div className="board-grid">
               {grid.map((row, rowIndex) =>
                 row.map((cell, colIndex) => {
-                  const type = cell.active ? cell.activeType : cell.type;
-                  const ghostType = cell.ghost ? cell.ghostType : 0;
-                  const dataType = type || ghostType || 0;
+                  const type      = cell.active ? cell.activeType : cell.type;
+                  const ghostType = cell.ghost   ? cell.ghostType  : 0;
+                  const dataType  = type || ghostType || 0;
                   return (
                     <div
                       key={`${rowIndex}-${colIndex}`}
@@ -577,6 +575,7 @@ export default function App() {
               )}
             </div>
             {wsMessage && <div className="ws-status">{wsMessage}</div>}
+
             {showPaused && (
               <div className="overlay">
                 <div className="overlay-card">
@@ -587,6 +586,7 @@ export default function App() {
                 </div>
               </div>
             )}
+
             {showOverlay && (
               <div className="overlay">
                 <div className="overlay-card gameover-card">
@@ -627,10 +627,7 @@ export default function App() {
                       New Game
                     </button>
                   </div>
-                  <button
-                    className="overlay-link"
-                    onClick={() => setActiveTab("leaderboard")}
-                  >
+                  <button className="overlay-link" onClick={() => setActiveTab("leaderboard")}>
                     🏆 View Leaderboard
                   </button>
                 </div>
@@ -638,7 +635,7 @@ export default function App() {
             )}
           </div>
 
-          {/* -- Mobile Touch Controls -- */}
+          {/* Mobile Touch Controls */}
           <div className="touch-controls">
             <div className="touch-row">
               <button className="touch-btn" onClick={() => sendAction("move_left")}>◀</button>
@@ -655,9 +652,13 @@ export default function App() {
           </div>
         </div>
 
-        {/* -- Right: Side Panel -- */}
+        {/* ── Right: Side Panel ── */}
         <div className="side-panel">
-          {/* Hold + Next in a compact row */}
+
+          {/* Spacer measured by JS — height set dynamically to match headerRef */}
+          <div ref={spacerRef} className="side-panel-spacer" />
+
+          {/* Hold + Next */}
           <div className="preview-row">
             <div className={`panel-block panel-compact ${state.holdUsed ? "hold-used" : ""}`}>
               <div className="panel-title">Hold <span className="hold-key-hint">[C]</span></div>
@@ -669,6 +670,7 @@ export default function App() {
             </div>
           </div>
 
+          {/* Stats */}
           <div className="panel-block">
             <div className="stats-grid">
               <div className="stat-item">
@@ -677,7 +679,9 @@ export default function App() {
               </div>
               <div className="stat-item">
                 <div className="panel-title">Best</div>
-                <div className={`panel-value highscore-value ${isNewHighScore ? "highscore-glow" : ""}`}>{state.highScore}</div>
+                <div className={`panel-value highscore-value ${isNewHighScore ? "highscore-glow" : ""}`}>
+                  {state.highScore}
+                </div>
               </div>
               <div className="stat-item">
                 <div className="panel-title">Level</div>
@@ -693,7 +697,7 @@ export default function App() {
             )}
           </div>
 
-          {/* Sound + Music toggles */}
+          {/* Sound + Music */}
           <div className="audio-row">
             <button
               id="sound-toggle"
@@ -725,7 +729,7 @@ export default function App() {
             ))}
           </div>
 
-          {/* Tab switcher: Controls / Leaderboard */}
+          {/* Tab switcher */}
           <div className="tab-switcher">
             <button
               className={`tab-btn ${activeTab === "controls" ? "tab-active" : ""}`}
@@ -780,6 +784,7 @@ export default function App() {
             </div>
           )}
         </div>
+
       </div>
     </div>
   );
@@ -789,7 +794,7 @@ export default function App() {
  * NEXT PIECE PREVIEW
  * ============================================================================= */
 function NextPiecePreview({ nextPiece }) {
-  const shape = nextPiece?.shape || [];
+  const shape     = nextPiece?.shape || [];
   const typeIndex = pieceTypeToIndex(nextPiece);
   const grid = Array.from({ length: PREVIEW_SIZE }, (_, r) =>
     Array.from({ length: PREVIEW_SIZE }, (_, c) => {
@@ -817,7 +822,7 @@ function NextPiecePreview({ nextPiece }) {
  * HOLD PIECE PREVIEW
  * ============================================================================= */
 function HoldPiecePreview({ heldPiece, holdUsed }) {
-  const shape = heldPiece?.shape || [];
+  const shape     = heldPiece?.shape || [];
   const typeIndex = pieceTypeToIndex(heldPiece);
   const grid = Array.from({ length: PREVIEW_SIZE }, (_, r) =>
     Array.from({ length: PREVIEW_SIZE }, (_, c) => {

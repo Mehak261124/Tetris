@@ -14,14 +14,18 @@
   --board-padding: clamp(6px, 1vmin, 16px);
   --panel-gap: clamp(12px, 2vmin, 20px);
   --font-title: clamp(12px, 2vmin, 18px);
-  --font-panel-title: clamp(8px, 1.2vmin, 11px);
-  --font-panel-value: clamp(12px, 1.6vmin, 16px);
-  --font-controls: clamp(7px, 1vmin, 10px);
+  --font-panel-title: 11px;
+  --font-panel-value: clamp(14px, 1.8vmin, 18px);
+  --font-controls: 10px;
   --font-overlay: clamp(10px, 1.6vmin, 14px);
 
   /* Neon accent palette */
   --cyan-glow: rgba(103, 232, 249, 0.7);
   --gold-glow: rgba(255, 215, 0, 0.6);
+
+  /* Height of the header above the board: title + gap + playerbar + gap      */
+  /* Keep in sync with .game-column gap and element sizes                      */
+
 }
 
 body {
@@ -48,7 +52,7 @@ body {
 .game-layout {
   display: flex;
   gap: clamp(12px, 2vw, 32px);
-  align-items: center;
+  align-items: flex-start;   /* both columns start at same top edge */
   max-height: 100vh;
   max-height: 100dvh;
 }
@@ -60,6 +64,14 @@ body {
   gap: clamp(4px, 0.8vmin, 12px);
 }
 
+.game-column-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(4px, 0.8vmin, 12px);
+  width: 100%;
+}
+
 /* ============================================================================
  * GAME TITLE
  * ============================================================================ */
@@ -68,6 +80,7 @@ body {
   letter-spacing: 4px;
   color: #67e8f9;
   text-shadow: 0 0 12px var(--cyan-glow);
+  line-height: 1.2;
 }
 
 /* ============================================================================
@@ -79,6 +92,7 @@ body {
   letter-spacing: 0.5px;
   padding: clamp(2px, 0.4vmin, 6px) 0;
   text-align: center;
+  line-height: 1.2;
 }
 
 .player-bar-label {
@@ -183,13 +197,32 @@ body {
 
 /* ============================================================================
  * SIDE PANEL
+ * The .game-column header = title + gap + playerbar + gap ≈ 60px.
+ * .side-panel-spacer (a real DOM div) pushes content to align with board top.
+ * In App.jsx, add <div className="side-panel-spacer" /> as the first child
+ * of .side-panel.
  * ============================================================================ */
 .side-panel {
   display: flex;
   flex-direction: column;
-  justify-content: center;
   gap: clamp(8px, 1.2vmin, 14px);
-  min-width: clamp(140px, 20vw, 240px);
+  width: clamp(280px, 28vw, 340px);
+  max-height: 100vh;
+  max-height: 100dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  box-sizing: border-box;
+}
+
+.side-panel::-webkit-scrollbar {
+  display: none;
+}
+
+/* Spacer that matches left column title + playerbar height */
+.side-panel-spacer {
+  flex-shrink: 0;
+  /* height injected by useLayoutEffect — do not set here */
 }
 
 /* Hold + Next side by side */
@@ -216,7 +249,7 @@ body {
 }
 
 .panel-title {
-  font-size: var(--font-panel-title);
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 1px;
   color: #7dd3fc;
@@ -224,7 +257,7 @@ body {
 
 .panel-value {
   margin-top: clamp(2px, 0.4vmin, 6px);
-  font-size: var(--font-panel-value);
+  font-size: clamp(14px, 1.8vmin, 18px);
   color: #e0f2fe;
 }
 
@@ -274,8 +307,8 @@ body {
 
 .controls {
   margin-top: clamp(6px, 1vmin, 12px);
-  font-size: var(--font-controls);
-  line-height: 1.6;
+  font-size: 10px;
+  line-height: 1.8;
   color: #cbd5f5;
   list-style: none;
   padding: 0;
@@ -284,8 +317,8 @@ body {
 .preview-grid {
   margin-top: clamp(6px, 1vmin, 12px);
   display: grid;
-  grid-template-columns: repeat(4, var(--cell-size));
-  grid-template-rows: repeat(4, var(--cell-size));
+  grid-template-columns: repeat(4, clamp(16px, 2.2vmin, 26px));
+  grid-template-rows: repeat(4, clamp(16px, 2.2vmin, 26px));
   gap: var(--cell-gap);
 }
 
@@ -313,8 +346,8 @@ body {
  * ============================================================================ */
 .sound-toggle {
   font-family: "Press Start 2P", monospace;
-  font-size: var(--font-controls);
-  padding: clamp(6px, 0.8vmin, 10px) clamp(10px, 1.2vmin, 16px);
+  font-size: 10px;
+  padding: clamp(8px, 1vmin, 12px) clamp(10px, 1.2vmin, 16px);
   background: rgba(8, 15, 25, 0.9);
   border: 1px solid rgba(0, 255, 255, 0.15);
   color: #7dd3fc;
@@ -350,8 +383,8 @@ body {
 .tab-btn {
   flex: 1;
   font-family: "Press Start 2P", monospace;
-  font-size: clamp(6px, 0.9vmin, 9px);
-  padding: clamp(6px, 0.8vmin, 10px) clamp(4px, 0.6vmin, 8px);
+  font-size: 10px;
+  padding: clamp(8px, 1vmin, 12px) clamp(4px, 0.6vmin, 8px);
   background: transparent;
   color: #64748b;
   border: none;
@@ -375,8 +408,9 @@ body {
  * LEADERBOARD PANEL
  * ============================================================================ */
 .leaderboard-panel {
-  max-height: clamp(180px, 30vh, 300px);
+  max-height: clamp(200px, 35vh, 380px);
   overflow-y: auto;
+  flex-shrink: 1;
 }
 
 .leaderboard-panel::-webkit-scrollbar {
@@ -391,7 +425,7 @@ body {
 }
 
 .lb-empty {
-  font-size: var(--font-controls);
+  font-size: 10px;
   color: #475569;
   padding: clamp(8px, 1vmin, 16px) 0;
   text-align: center;
@@ -408,7 +442,7 @@ body {
   display: flex;
   align-items: center;
   gap: clamp(4px, 0.6vmin, 8px);
-  font-size: var(--font-controls);
+  font-size: 10px;
   color: #cbd5f5;
   padding: clamp(3px, 0.4vmin, 6px) clamp(4px, 0.6vmin, 8px);
   border-radius: 6px;
@@ -495,7 +529,7 @@ body {
 }
 
 .new-highscore-badge {
-  font-size: var(--font-controls);
+  font-size: 10px;
   color: #ffd700;
   text-shadow: 0 0 12px var(--gold-glow);
   margin-bottom: clamp(8px, 1vmin, 14px);
@@ -532,7 +566,7 @@ body {
 }
 
 .gameover-stat-value {
-  font-size: var(--font-controls);
+  font-size: 10px;
   color: #e0f2fe;
 }
 
@@ -545,7 +579,7 @@ body {
 
 .overlay-button {
   font-family: "Press Start 2P", monospace;
-  font-size: var(--font-controls);
+  font-size: 10px;
   padding: clamp(6px, 1vmin, 10px) clamp(10px, 1.5vmin, 16px);
   background: #0ea5e9;
   color: #03131c;
@@ -579,7 +613,7 @@ body {
 
 .ws-status {
   margin-top: clamp(4px, 0.8vmin, 10px);
-  font-size: var(--font-controls);
+  font-size: 10px;
   color: #fbbf24;
   text-align: center;
 }
@@ -704,7 +738,7 @@ body {
   display: flex;
   align-items: center;
   gap: clamp(6px, 0.8vmin, 12px);
-  font-size: var(--font-controls);
+  font-size: 10px;
   color: #cbd5f5;
   padding: clamp(3px, 0.4vmin, 6px) 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.03);
@@ -882,6 +916,11 @@ body {
     gap: 8px;
   }
 
+  /* Hide spacer on mobile — not needed when layout is vertical */
+  .side-panel-spacer {
+    display: none;
+  }
+
   .panel-block {
     flex: 1 1 auto;
     min-width: 100px;
@@ -922,6 +961,10 @@ body {
   .side-panel {
     flex-direction: column;
     min-width: 120px;
+  }
+
+  .side-panel-spacer {
+    display: none;
   }
 }
 
@@ -985,8 +1028,8 @@ body {
 .theme-btn {
   flex: 1;
   font-family: "Press Start 2P", monospace;
-  font-size: clamp(5px, 0.6vmin, 7px);
-  padding: clamp(3px, 0.4vmin, 6px) clamp(4px, 0.5vmin, 8px);
+  font-size: 9px;
+  padding: clamp(6px, 0.8vmin, 10px) clamp(4px, 0.5vmin, 8px);
   background: rgba(15, 23, 42, 0.8);
   border: 1px solid rgba(100, 116, 139, 0.3);
   border-radius: 6px;
