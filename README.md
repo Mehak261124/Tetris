@@ -4,7 +4,7 @@
 > All gameplay is powered by six hand-written foundational libraries: `memory.c`, `string.c`, `math.c`, `screen.c`, `keyboard.c`, `sound.c`.
 
 **GitHub:** https://github.com/Mehak261124/Tetris  
-**Demo Recording:** see `/demo/` folder in this repository (screen recording of both terminal and web modes)
+**Demo Recording:** see `recording/terminal.mov` and `recording/ui.mov` in this repository
 
 ---
 
@@ -31,7 +31,7 @@ tetris/
 │   ├── ws_tetris.c    # Game logic + JSON state emitter
 │   └── Makefile
 ├── ui/                # Vite + React browser client
-├── demo/              # Screenshots and screen recording
+├── recording/         # Demo recordings (terminal + web modes)
 ├── Makefile           # Root build for terminal mode
 └── README.md
 ```
@@ -40,7 +40,9 @@ tetris/
 
 ## Demo
 
-A screen recording demonstrating both the terminal and web modes is available in the `/demo/` folder of this repository (`demo.mp4`).
+A screen recording demonstrating both modes is available in this repository:
+- `recording/terminal.mov` (terminal mode)
+- `recording/ui.mov` (web mode)
 
 ---
 

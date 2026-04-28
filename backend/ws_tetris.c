@@ -43,6 +43,7 @@
 #include <stdio.h>   /* allowed: terminal I/O simulation                      */
 #include <stdlib.h>  /* allowed: process start/exit only                       */
 #include <signal.h>  /* allowed: SIGINT/SIGTERM for clean shutdown             */
+#include <sys/time.h>  /* gettimeofday() — seed_rand() */
 
 /* ---- All five custom library headers (Section 3 Engine) ------------------ */
 #include "../include/keyboard.h"
