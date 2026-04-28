@@ -3,11 +3,6 @@
 > A Tetris game built from scratch in C with **zero standard library dependencies** for core logic.  
 > All gameplay is powered by six hand-written foundational libraries: `memory.c`, `string.c`, `math.c`, `screen.c`, `keyboard.c`, `sound.c`.
 
-**GitHub:** https://github.com/Mehak261124/Tetris  
-**Demo Recording:**  
-Terminal mode: https://drive.google.com/file/d/1WVm6Uo4LR3qpr2OEpeSnANbXet3-6sYx/view?usp=sharing  
-Web UI mode: https://drive.google.com/file/d/1Po07KVLVfixfhahjKLgABWrLFSJOFyVc/view?usp=sharing
-
 ---
 
 ## Repository Layout
