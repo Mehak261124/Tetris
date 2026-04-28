@@ -60,7 +60,7 @@ Operating Systems, Custom Libraries, Memory Management, WebSocket, Tetris, Proce
 \section{Introduction}
 
 \subsection{Problem Statement}
-Standard game engines rely heavily on standard library functions (\texttt{malloc}, \texttt{strlen}, \texttt{sin}, etc.) and opaque frameworks. This project challenges that paradigm by implementing a complete game system where all core logic is built from first principles --- custom arithmetic, custom string operations, custom memory allocation, and custom I/O drivers.
+Standard game engines rely heavily on standard library functions (\texttt{malloc}, \texttt{strlen}, \texttt{sin}, etc.) and opaque frameworks. This project challenges that paradigm by implementing a complete game system where all core logic is built from first principles --- custom arithmetic, custom string operations, custom memory allocation, and custom I/O drivers. The complete source code and full commit history are publicly available at \url{https://github.com/Mehak261124/Tetris}.
 
 \subsection{Objectives}
 \begin{enumerate}
@@ -84,7 +84,7 @@ The system follows a layered architecture where each custom library represents a
 Application Layer  : ws_tetris.c / main.c
 Core Library Layer : string.c | math.c | memory.c
 HAL Layer          : screen.c | keyboard.c | sound.c
-Host OS/Hardware   : POSIX sockets | Terminal | Audio
+Host OS / Hardware : POSIX sockets | Terminal | Audio
 \end{lstlisting}
 
 \textbf{Design Principle:} Game logic never includes networking headers, POSIX headers, or standard library functions beyond \texttt{<stdio.h>} and \texttt{<stdlib.h>}. All I/O flows through the Hardware Abstraction Layer (HAL).
@@ -103,9 +103,9 @@ Process management determines \textit{who gets to run, when, and where}. The gam
 \toprule
 \textbf{Process} & \textbf{Priority} & \textbf{Frequency} \\
 \midrule
-Input Polling & Highest & Every tick (50ms) \\
-Physics/Gravity & Medium & Level-dependent \\
-Rendering & Lowest & On state change \\
+Input Polling    & Highest & Every tick (50ms) \\
+Physics/Gravity  & Medium  & Level-dependent   \\
+Rendering        & Lowest  & On state change   \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -117,9 +117,11 @@ Rendering & Lowest & On state change \\
   \item Level 14+: \texttt{drop\_ticks = 1} --- 50ms (maximum speed)
 \end{itemize}
 
-\textbf{Lock Delay:} A 10-tick (500ms) timer prevents instant locking. The timer resets on successful moves/rotations (capped at 15 resets).
+\textbf{Lock Delay:} A 500ms timer prevents instant locking when a piece touches the ground. The timer resets on successful moves or rotations, capped at 15 resets per piece to prevent infinite stalling.
 
-\textbf{DAS/ARR:} Delayed Auto Shift (170ms delay) followed by Auto Repeat Rate (50ms interval) for smooth key repeat.
+\textbf{DAS/ARR:} The web client implements Delayed Auto Shift (170ms delay) followed by Auto Repeat Rate (50ms interval) for smooth, responsive key repeat matching modern Tetris standards.
+
+\textbf{Signal Handling:} \texttt{SIGINT} and \texttt{SIGTERM} are intercepted by a lightweight handler that sets a \texttt{volatile sig\_atomic\_t} flag. The game loop checks this flag once per frame and exits through the normal teardown path, ensuring \texttt{keyboard\_restore()} and \texttt{memory\_cleanup()} always run --- the terminal is never left in raw mode after a forced quit. \texttt{SIGWINCH} triggers a debounced resize handler: an 80\,ms \texttt{usleep()} wait discards all intermediate signals fired during continuous window drag, then a single \texttt{screen\_clear()} with the \texttt{\textbackslash{}033[3J\textbackslash{}033[2J\textbackslash{}033[H} sequence erases iTerm2's saved scrollback lines before redrawing the full frame cleanly.
 
 % ---- Module 2 ----
 \subsection{Module 2: Memory Management}
@@ -137,23 +139,23 @@ typedef struct BlockHeader {
 
 \textbf{Operations:}
 \begin{itemize}
-  \item \texttt{memory\_init(65536)} --- acquires one 64KB slab via the single permitted \texttt{malloc()}.
-  \item \texttt{t\_alloc(size)} --- first-fit search with 8-byte alignment; splits oversized blocks.
-  \item \texttt{t\_dealloc(ptr)} --- validates pointer ownership, marks free, coalesces adjacent free blocks.
-  \item \texttt{memory\_cleanup()} --- releases the slab back to the host OS.
+  \item \texttt{memory\_init(1\,048\,576)} --- acquires one 1\,MB slab via the single permitted \texttt{malloc()} call.
+  \item \texttt{t\_alloc(size)} --- first-fit search with 8-byte alignment; splits oversized blocks to minimise waste.
+  \item \texttt{t\_dealloc(ptr)} --- validates pointer ownership by walking the block list, marks free, then coalesces adjacent free blocks in a single pass.
+  \item \texttt{memory\_cleanup()} --- releases the entire slab back to the host OS via the single permitted \texttt{free()} call.
 \end{itemize}
 
-\textbf{Safety guarantees:} Alignment to 8-byte boundaries, pointer validation via block-list walk, double-free detection, out-of-bounds rejection, and NULL returns on failure.
+\textbf{Safety guarantees:} 8-byte alignment prevents misaligned struct access; pointer validation rejects bad inputs without crashing; double-free is silently ignored; \texttt{NULL} is returned on allocation failure so callers can check before use.
 
 % ---- Module 3 ----
 \subsection{Module 3: File System}
-The file system provides \textit{persistent storage} for scores and leaderboard history.
+The file system provides \textit{persistent storage} for leaderboard history across sessions.
 
 \begin{itemize}
-  \item \textbf{High Score File} (\texttt{highscore.txt}) --- terminal mode persists best score using \texttt{fopen/fgetc/fclose}.
-  \item \textbf{Leaderboard File} (\texttt{leaderboard.txt}) --- WebSocket mode stores top 10 entries sorted by score.
-  \item \textbf{Format:} \texttt{score|level|lines|name} (pipe-delimited, one entry per line).
-  \item \textbf{Edge cases:} Missing file starts empty, malformed lines use safe defaults, write failures degrade gracefully.
+  \item \textbf{Shared leaderboard file} (\texttt{leaderboard.txt}) --- both the terminal build (\texttt{main.c}) and the WebSocket backend (\texttt{ws\_tetris.c}) read and write the same file using the same format, so scores are shared across both play modes.
+  \item \textbf{Unified format:} \texttt{score|level|lines|name} (pipe-delimited, one entry per line, sorted descending by score). Top 5 entries stored in terminal mode, top 10 in web mode.
+  \item \textbf{Parsing:} \texttt{t\_split()} from \texttt{string.c} tokenises each line --- no \texttt{strtok} or \texttt{sscanf}.
+  \item \textbf{Edge cases:} Missing file starts with an empty table (not an error); malformed lines are silently skipped; write failures degrade gracefully (game continues, score is not persisted).
 \end{itemize}
 
 % ---- Module 4 ----
@@ -165,16 +167,18 @@ I/O management defines \textit{how this computer talks to the world} --- screen,
 \caption{I/O Device Mapping}
 \begin{tabular}{lll}
 \toprule
-\textbf{Device} & \textbf{Terminal} & \textbf{WebSocket} \\
+\textbf{Device} & \textbf{Terminal}         & \textbf{WebSocket}     \\
 \midrule
-Keyboard & \texttt{getchar()} raw & \texttt{recv()} + decode \\
-Screen & ANSI escapes & WebSocket frames \\
-Speaker & WAV + \texttt{afplay} & Web Audio API \\
+Keyboard        & \texttt{getchar()} raw    & \texttt{recv()} + WS decode \\
+Screen          & ANSI escape sequences     & WebSocket text frames  \\
+Speaker         & WAV + platform player     & Web Audio API          \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\textbf{Audio:} The terminal generates square-wave WAV files using pure integer arithmetic (no \texttt{<math.h>}), while the web client uses Web Audio API oscillators with an identical Korobeiniki melody.
+\textbf{Audio --- cross-platform design:} \texttt{sound.c} generates square-wave WAV files at startup using pure integer arithmetic (no \texttt{<math.h>}). Playback uses a compile-time platform detection macro: \texttt{afplay} on macOS and \texttt{aplay} (ALSA) on Linux, with \texttt{paplay} (PulseAudio) as a secondary Linux fallback. A runtime availability check using \texttt{access()} confirms the binary exists before any \texttt{fork()} is attempted --- if no player is found the game runs silently with no crash or zombie processes.
+
+\textbf{WebSocket I/O:} \texttt{keyboard.c} owns the receive path (\texttt{keyboard\_recv\_ws} decodes RFC\,6455 masked frames). \texttt{screen.c} owns the send path (\texttt{screen\_send\_ws} encodes WebSocket text frames). Game logic in \texttt{ws\_tetris.c} calls only these abstractions --- zero POSIX socket headers appear outside the HAL.
 
 % ---- Module 5 ----
 \subsection{Module 5: Error Handling \& Security}
@@ -185,58 +189,66 @@ Error handling ensures \textit{graceful behaviour when things go wrong}.
 \caption{Error Handling Matrix}
 \begin{tabular}{ll}
 \toprule
-\textbf{Error Category} & \textbf{Handler} \\
+\textbf{Error Category}      & \textbf{Handler}                        \\
 \midrule
-Division by zero & Returns 0 safely \\
-Memory OOM & NULL-checked, graceful exit \\
-Board out-of-bounds & \texttt{t\_in\_bounds()} guards \\
-Buffer overflow & \texttt{t\_strncpy()} with max-length \\
-Double-free & Silently ignored \\
-Invalid pointer free & Validated against block list \\
-Client disconnect & Re-accept without restart \\
-Malformed JSON & Silently dropped \\
-Handshake failure & Retry with next client \\
-SIGINT & Terminal state restored \\
+Division by zero             & \texttt{t\_div}/\texttt{t\_mod} return 0 safely \\
+Memory OOM                   & \texttt{t\_alloc} returns NULL; caller checks \\
+Board out-of-bounds          & \texttt{t\_in\_bounds()} guards all writes \\
+Buffer overflow              & \texttt{t\_strncpy()} enforces max-length \\
+Double-free                  & Block-list walk detects and ignores      \\
+Invalid pointer free         & Range check + ownership walk rejects it  \\
+SIGINT / SIGTERM             & Flag set; loop exits; terminal restored  \\
+SIGWINCH                     & Flag set; full redraw on next frame      \\
+Client disconnect            & Server re-accepts without restart        \\
+Malformed JSON / WebSocket   & Frame silently dropped; loop continues   \\
+Handshake failure            & Retry with next client connection        \\
+Audio player missing         & Runtime check; game runs silently        \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\textbf{Secure halt:} \texttt{screen\_panic(msg)} is called on unrecoverable errors (e.g.\ allocation failure at boot). It restores the terminal cursor and raw-mode state, prints a \texttt{[KERNEL PANIC]} message to \texttt{stderr}, and calls \texttt{exit(1)} --- the shell is always left in a usable state.
 
 % ---- Module 6 ----
 \subsection{Module 6: Networking}
 Networking defines \textit{how this computer talks to another computer}.
 
-\textbf{Protocol:} WebSocket (RFC 6455) over TCP.
+\textbf{Protocol:} WebSocket (RFC\,6455) over TCP on port 8080.
 
 \textbf{Key features:}
 \begin{itemize}
-  \item Persistent server socket survives page refresh.
-  \item Auto-reconnect client with 1.5s backoff.
-  \item Full RFC 6455: SHA-1 handshake, masked frame decode, opcode handling.
-  \item JSON state protocol: full game state serialized every dirty tick.
-  \item Hardware abstraction: all socket headers confined to \texttt{screen.c} and \texttt{keyboard.c}.
+  \item \textbf{Persistent server socket:} survives page refresh and client reconnection. The outer accept loop re-accepts a new client without restarting the process.
+  \item \textbf{Auto-reconnect client:} the React frontend retries with 1.5\,s exponential backoff on disconnect.
+  \item \textbf{Full RFC\,6455 compliance:} SHA-1 handshake (implemented without \texttt{<openssl>}), masked frame decoding, FIN bit handling, close frame detection.
+  \item \textbf{JSON state protocol:} full game state serialised every dirty tick (board, current/ghost/next/held pieces, score, leaderboard). Serialisation uses only \texttt{t\_itoa} and manual string building --- no \texttt{sprintf} or \texttt{<string.h>}.
+  \item \textbf{Hardware abstraction:} all socket and POSIX network headers (\texttt{sys/socket.h}, \texttt{arpa/inet.h}) are confined exclusively to \texttt{screen.c} and \texttt{keyboard.c} --- zero networking code appears in game logic.
 \end{itemize}
 
 % ---- Module 7 ----
 \subsection{Module 7: User Interface}
 The user interface defines \textit{how a user interacts with the game}.
 
-\textbf{Terminal UI:} ANSI-colored 10x20 board with piece-type colors, ghost piece, next piece preview, HUD panel, game-over overlay, player name entry, sound effects, and background music.
+\textbf{Terminal UI:} ANSI-colored 10$\times$20 board with piece-type colors, ghost piece (shown as \texttt{-{}-}), next piece preview, hold piece display, HUD panel with score/level/lines/combo, game-over overlay showing the top-5 leaderboard, player name entry via \texttt{readLine()}, 4 block themes switchable with \texttt{T}, and background music.
 
-\textbf{Web UI:} React + Vite with CRT scanline aesthetic, 4 selectable themes (Neon, Retro, Mono, Pastel), hold piece, ghost piece, 7-bag randomizer, SRS wall kicks, lock delay, DAS/ARR, combo system, level-up animations, leaderboard, touch controls, SFX toggle, and background music toggle.
+\textbf{Web UI:} React\,18 + Vite with CRT scanline aesthetic, 4 selectable color themes (Neon, Retro, Mono, Pastel), hold piece, ghost piece, 7-bag randomizer, full SRS wall kicks (5-test per rotation), lock delay, DAS/ARR, combo system with live counter, level-up flash animation, top-10 leaderboard tab, mobile touch controls, SFX and music toggles, and auto-reconnect status indicator.
 
 % ============================================================================
 \section{Implementation Details}
 
 \subsection{Custom Library Pipeline}
 
+The six libraries form an explicit data-flow pipeline used in every game action:
+
 \begin{lstlisting}[caption={Data Flow Pipeline}]
-Input    -> keyboard.c  (captures raw input)
-Parsing  -> string.c    (t_strcmp, t_itoa, t_strlen)
-State    -> memory.c    (t_alloc for Game struct)
-Logic    -> math.c      (t_mul, t_mod, t_div)
-Output   -> screen.c    (ANSI / WebSocket frames)
-Audio    -> sound.c     (WAV generation / Web Audio)
+Input  -> keyboard.c (keyPressed / keyboard_recv_ws)
+Parse  -> string.c   (t_strcmp, t_split, t_strlen)
+State  -> memory.c   (t_alloc / t_dealloc)
+Logic  -> math.c     (t_mul, t_mod, t_div, t_in_bounds)
+Output -> screen.c   (ANSI escapes / screen_send_ws)
+Audio  -> sound.c    (WAV gen / fork+exec player)
 \end{lstlisting}
+
+\textbf{Concrete example --- key dispatch:} \texttt{keyPressed()} returns a \texttt{char}; \texttt{key\_matches()} wraps it in a 2-byte string and calls \texttt{t\_strcmp()} for comparison; the matched action calls \texttt{t\_in\_bounds()} before any board write; the updated score is converted with \texttt{t\_itoa()} and sent via \texttt{screen\_render\_string()}. Every layer of the pipeline is exercised in a single keypress.
 
 \subsection{Gameplay Mechanics}
 
@@ -245,26 +257,26 @@ Audio    -> sound.c     (WAV generation / Web Audio)
 \caption{Gameplay Feature Matrix}
 \begin{tabular}{lcc}
 \toprule
-\textbf{Feature} & \textbf{Terminal} & \textbf{Web} \\
+\textbf{Feature}        & \textbf{Terminal} & \textbf{Web}   \\
 \midrule
-7 Tetrominoes & \checkmark & \checkmark \\
-Ghost Piece & \checkmark & \checkmark \\
-Soft/Hard Drop & \checkmark & \checkmark \\
-Level Progression & \checkmark & \checkmark \\
-Sound Effects & \checkmark & \checkmark \\
-Background Music & \checkmark & \checkmark \\
-Player Name Entry & \checkmark & \checkmark \\
-Score Persistence & \checkmark & \checkmark \\
-Pause/Resume & \checkmark & \checkmark \\
-SRS Wall Kicks & Basic & Full SRS \\
-Hold Piece & \checkmark & \checkmark \\
-7-Bag Randomizer & \checkmark & \checkmark \\
-Lock Delay & \checkmark & \checkmark \\
-DAS/ARR & $-$ & \checkmark \\
-Combo System & \checkmark & \checkmark \\
-Leaderboard & \checkmark & \checkmark \\
-Theme Switcher & \checkmark & \checkmark \\
-Touch Controls & $-$ & \checkmark \\
+7 Tetrominoes           & \checkmark        & \checkmark     \\
+Ghost Piece             & \checkmark        & \checkmark     \\
+Soft / Hard Drop        & \checkmark        & \checkmark     \\
+Level Progression       & \checkmark        & \checkmark     \\
+Sound Effects           & \checkmark        & \checkmark     \\
+Background Music        & \checkmark        & \checkmark     \\
+Player Name Entry       & \checkmark        & \checkmark     \\
+Score Persistence       & \checkmark        & \checkmark     \\
+Pause / Resume          & \checkmark        & \checkmark     \\
+Hold Piece              & \checkmark        & \checkmark     \\
+7-Bag Randomizer        & \checkmark        & \checkmark     \\
+Lock Delay              & \checkmark        & \checkmark     \\
+Combo System            & \checkmark        & \checkmark     \\
+Leaderboard             & Top 5             & Top 10         \\
+Theme Switcher          & 4 block styles    & 4 color themes \\
+SRS Wall Kicks          & Basic (1-test)    & Full (5-test)  \\
+DAS / ARR               & ---               & \checkmark     \\
+Touch Controls          & ---               & \checkmark     \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -276,14 +288,17 @@ Touch Controls & $-$ & \checkmark \\
 \caption{Technology Components}
 \begin{tabular}{ll}
 \toprule
-\textbf{Component} & \textbf{Technology} \\
+\textbf{Component}  & \textbf{Technology}               \\
 \midrule
-Backend & C (gcc -Wall -Wextra -O2) \\
-Frontend & React 18 + Vite \\
-Transport & WebSocket (RFC 6455) \\
-Audio & WAV / Web Audio API \\
-Persistence & Plain text files \\
-Build & Make / npm \\
+Terminal backend    & C (gcc -Wall -Wextra -O2)         \\
+WebSocket backend   & C (gcc -Wall -Wextra -O2)         \\
+Frontend            & React 18 + Vite                   \\
+Transport           & WebSocket RFC 6455 / TCP          \\
+Audio (macOS)       & WAV + afplay                      \\
+Audio (Linux)       & WAV + aplay / paplay              \\
+Audio (Web)         & Web Audio API oscillators         \\
+Persistence         & Plain text (pipe-delimited)       \\
+Build               & GNU Make / npm                    \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -292,7 +307,14 @@ Build & Make / npm \\
 \section{Results and Testing}
 
 \subsection{Compilation}
-Both build targets compile with zero warnings under strict flags: \texttt{gcc -Wall -Wextra} (terminal) and \texttt{gcc -Wall -Wextra -O2} (backend).
+Both build targets compile with zero warnings and zero errors under strict flags:
+\begin{itemize}
+  \item Terminal: \texttt{gcc -Wall -Wextra -O2 src/*.c -o tetris\_os}
+  \item Backend:  \texttt{gcc -Wall -Wextra -O2 backend/ws\_tetris.c src/\{string,math,memory,screen,keyboard\}.c -o tetris\_ws}
+\end{itemize}
+
+\subsection{Demo}
+A screen recording demonstrating both the terminal and web modes is available in the project repository at \url{https://github.com/Mehak261124/Tetris}. A screen recording demonstrating both modes is available in the \texttt{/demo/} folder of the repository.
 
 \subsection{Edge Cases Verified}
 
@@ -301,48 +323,70 @@ Both build targets compile with zero warnings under strict flags: \texttt{gcc -W
 \caption{Test Results}
 \begin{tabular}{lcc}
 \toprule
-\textbf{Test Case} & \textbf{Expected} & \textbf{Result} \\
+\textbf{Test Case}              & \textbf{Expected}   & \textbf{Result} \\
 \midrule
-Division by zero & Returns 0 & Pass \\
-\texttt{t\_alloc(0)} & Returns NULL & Pass \\
-\texttt{t\_dealloc(NULL)} & No-op & Pass \\
-Double-free & Ignored & Pass \\
-Page refresh & Re-accepts & Pass \\
-Empty leaderboard & Starts empty & Pass \\
-Name overflow (>20) & Truncated & Pass \\
-Wall kick rotation & 5 tests & Pass \\
-Hold twice per turn & Blocked & Pass \\
-Malformed WebSocket & Dropped & Pass \\
-Memory exhaustion & NULL logged & Pass \\
+Division by zero                & Returns 0           & Pass \\
+\texttt{t\_alloc(0)}            & Returns NULL        & Pass \\
+\texttt{t\_alloc} OOM           & Returns NULL        & Pass \\
+\texttt{t\_dealloc(NULL)}       & No-op               & Pass \\
+Double-free                     & Silently ignored    & Pass \\
+Invalid pointer free            & Rejected            & Pass \\
+SIGINT during gameplay          & Terminal restored   & Pass \\
+SIGTERM during gameplay         & Terminal restored   & Pass \\
+Terminal resize (SIGWINCH)      & Full redraw         & Pass \\
+Terminal too small              & Warning displayed   & Pass \\
+Page refresh (WS disconnect)    & Re-accepts          & Pass \\
+Empty leaderboard file          & Starts fresh        & Pass \\
+Malformed leaderboard line      & Line skipped        & Pass \\
+Name overflow ($>$20 chars)     & Truncated safely    & Pass \\
+Empty name input                & Defaults to Player  & Pass \\
+Wall kick rotation (5 tests)    & All 5 attempted     & Pass \\
+Hold twice per turn             & Second hold blocked & Pass \\
+Malformed WebSocket frame       & Silently dropped    & Pass \\
+WS handshake failure            & Retry next client   & Pass \\
+Audio player not installed      & Silent, no crash    & Pass \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \subsection{Performance}
 \begin{itemize}
-  \item Game loop tick rate: 50ms (20 Hz physics)
-  \item WebSocket frame size: 2--4 KB per state update
-  \item Memory footprint: 64 KB arena (game state < 2 KB)
-  \item Frontend bundle: < 100 KB (production)
+  \item Game loop tick rate: 50\,ms (20\,Hz physics), 16\,ms render budget (~60\,fps)
+  \item WebSocket frame size: 2--4\,KB per state update
+  \item Memory footprint: 1\,MB arena allocated; game state occupies $<$2\,KB
+  \item Frontend bundle: $<$100\,KB (production build)
+\end{itemize}
+
+% ============================================================================
+\section{Known Issues}
+
+Honest self-evaluation of current limitations:
+
+\begin{itemize}
+  \item \textbf{T-spin detection not implemented.} The \texttt{last\_was\_rotate} flag is tracked in \texttt{ws\_tetris.c} but the 4-corner detection logic and T-spin bonus scoring are not yet applied.
+  \item \textbf{Terminal leaderboard limited to 5 entries.} The web backend stores 10 entries; the terminal mode stores 5. Both read the same file so the terminal silently discards entries 6--10 on load.
+  \item \textbf{Background music does not loop seamlessly in the web client.} The melody restarts with a brief gap between repeats due to the \texttt{setTimeout}-based sequencer.
+  \item \textbf{No DAS/ARR in terminal mode.} Rapid key repeat relies entirely on the OS keyboard repeat rate; the 170\,ms / 50\,ms DAS/ARR system is web-only.
+  \item \textbf{Audio requires external binary on Linux.} \texttt{aplay} (ALSA) or \texttt{paplay} (PulseAudio) must be installed separately; the game degrades to silence if neither is present.
 \end{itemize}
 
 % ============================================================================
 \section{Future Scope}
 
 \begin{enumerate}
-  \item \textbf{Multiplayer Mode:} Extend WebSocket server for concurrent clients with garbage-line mechanics.
-  \item \textbf{T-Spin Detection:} Implement 4-corner T-spin scoring (infrastructure already in place with \texttt{last\_was\_rotate} flag).
-  \item \textbf{Sprint Mode:} Timed 40-line clear challenge demonstrating advanced process scheduling.
-  \item \textbf{Replay System:} Record inputs with timestamps for playback (file system extension).
-  \item \textbf{Cross-Platform Audio:} Replace macOS \texttt{afplay} with portable PCM output.
-  \item \textbf{WebRTC Signaling:} Peer-to-peer multiplayer over the internet.
-  \item \textbf{Persistent Sessions:} Token-based session tracking across server restarts.
+  \item \textbf{Multiplayer mode:} extend the WebSocket server to handle concurrent clients with garbage-line mechanics and a shared leaderboard.
+  \item \textbf{T-spin detection:} implement 4-corner T-spin scoring using the existing \texttt{last\_was\_rotate} flag infrastructure.
+  \item \textbf{Sprint mode:} timed 40-line clear challenge demonstrating advanced process scheduling (deadline-driven tick rate).
+  \item \textbf{Replay system:} record timestamped inputs to file (file system extension) and replay them deterministically via the seeded LCG.
+  \item \textbf{WebRTC signaling:} peer-to-peer multiplayer over the internet without a relay server.
+  \item \textbf{Persistent sessions:} token-based session tracking so a web player's game survives a server restart.
+  \item \textbf{DAS/ARR in terminal mode:} port the 170\,ms / 50\,ms repeat system from the web client to the keyboard.c raw-mode input path.
 \end{enumerate}
 
 % ============================================================================
 \section{Conclusion}
 
-The Tetris OS Simulator successfully demonstrates all seven fundamental OS module categories through a practical, interactive application. By replacing all standard library functions with custom implementations, the project provides deep understanding of how operating systems manage processes, memory, I/O devices, file systems, and error conditions. The dual-mode architecture (terminal + WebSocket) showcases hardware abstraction principles, while the persistent leaderboard and real-time networking demonstrate file system and communication protocol implementations. Both build targets compile with zero warnings, and comprehensive edge-case testing confirms robust error handling across all subsystems.
+The Tetris OS Simulator successfully demonstrates all seven fundamental OS module categories through a practical, interactive application. By replacing every standard library function with a custom implementation, the project provides a concrete, hands-on understanding of how operating systems manage processes, memory, I/O devices, file systems, and error conditions at the lowest level. The dual-mode architecture (terminal + WebSocket) showcases hardware abstraction principles, while the unified leaderboard file, real-time JSON protocol, and automatic reconnection demonstrate file system and networking implementations working together. Both build targets compile with zero warnings under \texttt{-Wall -Wextra}, comprehensive edge-case testing confirms robust error handling, and the full commit history at \url{https://github.com/Mehak261124/Tetris} documents the incremental development of each module.
 
 % ============================================================================
 \begin{thebibliography}{10}
@@ -371,8 +415,8 @@ B. W. Kernighan and D. M. Ritchie, \textit{The C Programming Language}, 2nd ed. 
 \bibitem{react}
 React Team, ``React Documentation,'' Meta Open Source, 2024. [Online]. Available: \url{https://react.dev}
 
-\bibitem{tls}
-E. Rescorla, ``HTTP Over TLS,'' IETF RFC 2818, May 2000.
+\bibitem{posix}
+IEEE Std 1003.1-2017, \textit{The Open Group Base Specifications Issue 7}, IEEE, 2017.
 
 \bibitem{knuth}
 D. E. Knuth, \textit{The Art of Computer Programming, Vol. 2: Seminumerical Algorithms}, 3rd ed. Boston, MA: Addison-Wesley, 1997.

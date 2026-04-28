@@ -96,28 +96,85 @@ const MELODY = [
 
 class BGMusic {
   constructor() {
-    this._playing = false;
-    this._timer = null;
-    this._idx = 0;
+    this._playing  = false;
+    this._timer    = null;
+    this._nodes    = [];   /* active oscillator + gain pairs for cleanup */
   }
+ 
   start() {
     if (this._playing) return;
     this._playing = true;
-    this._idx = 0;
-    this._tick();
+    this._schedule(0);     /* schedule first pass starting now */
   }
+ 
   stop() {
     this._playing = false;
     if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+    /* Disconnect all live nodes immediately */
+    this._nodes.forEach(({ osc, gain }) => {
+      try { osc.stop();        } catch (e) { /* already stopped */ }
+      try { osc.disconnect();  } catch (e) {}
+      try { gain.disconnect(); } catch (e) {}
+    });
+    this._nodes = [];
   }
-  _tick() {
+ 
+  /*
+   * _schedule(startTime)
+   *   Schedules the entire melody starting at AudioContext time `startTime`.
+   *   Returns the total melody duration in seconds.
+   *   Calls itself recursively (via setTimeout) just before the melody ends
+   *   so the next repeat is already queued with zero gap.
+   */
+  _schedule(startTime) {
     if (!this._playing) return;
-    const [freq, dur] = MELODY[this._idx];
-    if (freq > 0) playTone(freq, dur / 1200, "square", 0.03);
-    this._idx = (this._idx + 1) % MELODY.length;
-    this._timer = setTimeout(() => this._tick(), dur);
+    try {
+      const ctx = getAudioCtx();
+      /* If startTime is in the past (first call), start from "now + tiny buffer" */
+      const t0  = Math.max(startTime, ctx.currentTime + 0.01);
+      let   t   = t0;
+ 
+      for (const [freq, durMs] of MELODY) {
+        const dur = durMs / 1000;
+        if (freq > 0) {
+          const osc  = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "square";
+          osc.frequency.setValueAtTime(freq, t);
+          gain.gain.setValueAtTime(0.025, t);
+          /* Tiny fade-out at note end to avoid clicks */
+          gain.gain.setValueAtTime(0.025, t + dur - 0.01);
+          gain.gain.linearRampToValueAtTime(0, t + dur);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(t);
+          osc.stop(t + dur);
+          this._nodes.push({ osc, gain });
+        }
+        t += dur;
+      }
+ 
+      const totalDur = t - t0;   /* seconds for the full melody */
+ 
+      /*
+       * Schedule the next repeat 50ms before this one ends.
+       * Using setTimeout with (totalDur - 0.05) * 1000 ms.
+       * The next _schedule call passes t0 + totalDur as the exact
+       * start time so there is zero gap between repeats.
+       */
+      this._timer = setTimeout(() => {
+        /* Clean up nodes that have already finished */
+        this._nodes = this._nodes.filter(({ osc }) => {
+          try { return osc.context.state !== "closed"; }
+          catch (e) { return false; }
+        });
+        this._schedule(t0 + totalDur);
+      }, Math.max(0, (totalDur - 0.05) * 1000));
+ 
+    } catch (e) { /* audio context not available */ }
   }
 }
+ 
 const bgm = new BGMusic();
 
 /* =============================================================================
