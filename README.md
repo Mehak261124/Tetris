@@ -4,7 +4,9 @@
 > All gameplay is powered by six hand-written foundational libraries: `memory.c`, `string.c`, `math.c`, `screen.c`, `keyboard.c`, `sound.c`.
 
 **GitHub:** https://github.com/Mehak261124/Tetris  
-**Demo Recording:** see `recording/terminal.mov` and `recording/ui.mov` in this repository
+**Demo Recording:**  
+Terminal mode: https://drive.google.com/file/d/1WVm6Uo4LR3qpr2OEpeSnANbXet3-6sYx/view?usp=sharing  
+Web UI mode: https://drive.google.com/file/d/1Po07KVLVfixfhahjKLgABWrLFSJOFyVc/view?usp=sharing
 
 ---
 
@@ -40,9 +42,9 @@ tetris/
 
 ## Demo
 
-A screen recording demonstrating both modes is available in this repository:
-- `recording/terminal.mov` (terminal mode)
-- `recording/ui.mov` (web mode)
+A screen recording demonstrating both modes:
+- Terminal mode: https://drive.google.com/file/d/1WVm6Uo4LR3qpr2OEpeSnANbXet3-6sYx/view?usp=sharing
+- Web UI mode: https://drive.google.com/file/d/1Po07KVLVfixfhahjKLgABWrLFSJOFyVc/view?usp=sharing
 
 ---
 
